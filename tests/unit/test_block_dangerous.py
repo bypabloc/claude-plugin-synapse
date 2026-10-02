@@ -60,6 +60,13 @@ def test_laya_receives_command_without_comments_or_heredoc_body(laya, tmp_path) 
     assert "python3 x.py" in sent
 
 
+def test_laya_receives_quoted_args_intact(laya, tmp_path) -> None:
+    # Sin comillas, 'atob|JPEG|evaluate' parece un pipe a comandos desconocidos y Laya lo marcaba catastrófico
+    laya.predict.return_value = _answers("safe_operation", 0.9, "no", 0.9)
+    _run("python3 - <<'EOF'\nprint(1)\nEOF\nrg -n \"atob|JPEG|evaluate\" a.ts 2>&1 | head  # nota", tmp_path)
+    assert laya.predict.call_args.args[0] == "python3 - << EOF rg -n 'atob|JPEG|evaluate' a.ts 2 >& 1 | head"
+
+
 @pytest.mark.parametrize(
     "command",
     [

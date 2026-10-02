@@ -46,7 +46,6 @@ import os
 import re
 import shlex
 import sys
-from pathlib import Path
 
 # Agregar directorio actual a sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -177,13 +177,16 @@ def is_routine(command: str) -> bool:
 
 
 HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+SHELL_OP_RE = re.compile(r"[();<>|&]+")
+NEEDS_QUOTE_RE = re.compile(r"[\s();<>|&'\"]")
 
 
 def strip_for_classifier(command: str) -> str:
-    """Quita comentarios y cuerpos de heredoc antes de Laya.
+    """Quita comentarios y cuerpos de heredoc antes de Laya, conservando las comillas de los argumentos.
 
     Ambos son texto libre que el agente (o una inyección) controla: medido en 45 comandos, un comentario
     cambia la decisión de Laya en ~15% de los casos y puede volver inofensivo uno malicioso.
+    Sin comillas, `rg "a|b"` llega como `rg a|b` (un pipe falso) y Laya lo marcaba catastrófico.
     """
     lines = command.splitlines()
     kept: list[str] = []
@@ -198,9 +201,12 @@ def strip_for_classifier(command: str) -> str:
             delimiter = match.group(2)
         kept.append(line)
     try:
-        return " ".join(" ".join(shlex.split(line, comments=True)) for line in kept).strip()
+        lexer = shlex.shlex("\n".join(kept), posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
     except ValueError:
         return " ".join(kept)
+    return " ".join(t if SHELL_OP_RE.fullmatch(t) or not NEEDS_QUOTE_RE.search(t) else shlex.quote(t) for t in tokens)
 
 
 def _block(reason: str, target: str) -> None:
