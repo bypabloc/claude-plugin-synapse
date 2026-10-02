@@ -14,10 +14,7 @@ FLAGGING_ANSWERS = {
     },
     "protect_files": {"file_sensitivity": {"choice": "critical_blocked", "answer_confidence": 0.99}},
     "block_env_read": {"env_intent": {"choice": "read_or_exfiltrate", "answer_confidence": 0.99}},
-    "block_dangerous": {
-        "danger_type": {"choice": "catastrophic", "answer_confidence": 0.99},
-        "is_catastrophic": {"choice": "yes", "answer_confidence": 0.99},
-    },
+    "block_dangerous": {"danger": {"choice": "A", "probabilities": {"A": 0.9999, "B": 0.0001}}},
 }
 
 PAYLOADS = {
@@ -36,6 +33,10 @@ def test_laya_flag_asks_instead_of_blocking(hook: str, tmp_path) -> None:
     payload = {**PAYLOADS[hook], "cwd": str(tmp_path)}
     with mock.patch.object(mod, "should_use_laya", return_value=True), \
          mock.patch.object(mod, "get_laya_router", return_value=router):
-        result = run_in_process(hook, payload)
+        if hasattr(mod, "apply_finetuned_delta"):  # no cargar 100 MB de pesos reales en un test unitario
+            with mock.patch.object(mod, "apply_finetuned_delta", return_value=True):
+                result = run_in_process(hook, payload)
+        else:
+            result = run_in_process(hook, payload)
     router.predict.assert_called_once()
     assert (result.exit_code, result.decision) == (0, "ask"), result.stderr

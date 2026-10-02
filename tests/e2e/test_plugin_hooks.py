@@ -76,7 +76,9 @@ def claude(repo: Path, laya_flag: str, tmp_path: Path, monkeypatch):
 
 
 SCENARIOS = [
-    pytest.param("Bash", {"command": "mkdir -p client/tests/tdd && cat > client/tests/tdd/x.test.tsx <<'EOF'\nit()\nEOF"}, "passthrough", id="bash_heredoc_crea_test"),
+    pytest.param("Bash", {"command": "mkdir -p client/tests/tdd && cat > client/tests/tdd/x.test.tsx <<'EOF'\nit()\nEOF"}, "deny", id="bash_heredoc_crea_test"),
+    pytest.param("Bash", {"command": "sed -i 's/a/b/' src/app.py"}, "deny", id="bash_sed_inplace"),
+    pytest.param("Bash", {"command": "pytest -q > tmp/out.log 2>&1"}, "passthrough", id="bash_salida_de_herramienta"),
     pytest.param("Bash", {"command": "rm -f client/tests/tdd/chart.tdd.test.tsx && grep -n x src/app.py"}, "allow", id="bash_rm_archivo_sin_seguimiento"),
     pytest.param("Bash", {"command": "rm -f src/app.py"}, "ask", id="bash_rm_archivo_rastreado"),
     pytest.param("Bash", {"command": "rm -rf /"}, "deny", id="bash_rm_raiz"),

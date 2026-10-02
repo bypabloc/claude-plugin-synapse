@@ -11,6 +11,11 @@
 - **Prohibición de `/tmp` del Sistema**: Salvo el scratchpad de sesión, está estrictamente prohibido usar `/tmp` del sistema operativo; todo archivo temporal debe residir en `./tmp/` del proyecto.
 - **Artefactos de Build y Caches**: Se autoriza la limpieza de artefactos conocidos (`__pycache__`, `.pytest_cache`, `.ruff_cache`, `dist`, `build`, `*.pyc`, `*.log`, `*.cache`).
 
+## 1b. Escritura de Archivos: Solo con Write/Edit
+- **Prohibido escribir archivos desde Bash** con contenido propio: `echo`/`printf` redirigidos, `cat > f <<EOF`, `tee f <<EOF`, `sed -i`, `perl -i`, `python3 - <<EOF … open(p, 'w')`, `python3 -c`/`node -e` que escriben. El hook lo bloquea (exit 2).
+- **Usar las tools de Claude Code**: `Write` para archivos nuevos o completos, `Edit` para cambios parciales (`replace_all` para reemplazos repetidos). El cambio queda revisable como diff.
+- **Permitido**: salida de herramientas (`pytest > tmp/out.log`, `npm test | tee tmp/log`, `git`, builds, formatters) y estados de shell (`echo "exit=$?" >> tmp/log`).
+
 ## 2. Protección de Credenciales y Archivos `.env`
 - **Bloqueo de Lectura Directa**: Queda terminantemente bloqueada la lectura del contenido de archivos `.env*` a través de herramientas de lectura (`Read`) o utilidades de shell (`cat`, `head`, `tail`, `awk`, `sed`, `grep`, `cut`, `base64`, `xxd`).
 - **Carga de Variables Permitida**: Para utilizar variables de entorno sin exponer sus secretos al contexto de la IA, use en Bash:

@@ -780,7 +780,7 @@
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "echo x > /tmp/claude-1000/abc/out.txt"
+        "command": "pytest -q > /tmp/claude-1000/abc/out.txt"
       },
       "cwd": "{project}"
     },
@@ -818,6 +818,141 @@
       },
       "cwd": "{project}"
     },
+    "expected_exit": 0
+  },
+  {
+    "name": "block_bash_write_echo_redirect",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "echo 'x = 1' > src/a.py"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "block_bash_write_printf_append",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "printf '%s\\n' '- item' >> notes.md"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "block_bash_write_echo_scratchpad",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "echo x > /tmp/claude-1000/abc/out.txt"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "block_bash_write_cat_heredoc",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "mkdir -p src && cat > src/x.ts <<'EOF'\nexport {}\nEOF"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "block_bash_write_tee_heredoc",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "tee src/x.ts <<'EOF'\nexport {}\nEOF"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "block_bash_write_echo_tee",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "echo x | tee -a src/a.txt"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "block_bash_write_sed_inplace",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i 's/a/b/' src/app.py"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Edit"
+  },
+  {
+    "name": "block_bash_write_perl_inplace",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "perl -pi -e 's/a/b/' src/app.py"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Edit"
+  },
+  {
+    "name": "block_bash_write_python_heredoc",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 - <<'EOF'\np='a.e2e.ts'\ns=open(p).read().replace('a','b')\nopen(p,'w').write(s)\nEOF\ndiff a b && echo IGUALES"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Edit"
+  },
+  {
+    "name": "block_bash_write_python_c",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"from pathlib import Path; Path('a.txt').write_text('x')\""}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Edit"
+  },
+  {
+    "name": "block_bash_write_node_e",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "node -e \"require('fs').writeFileSync('a.txt', 'x')\""}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Edit"
+  },
+  {
+    "name": "pass_tool_output_redirect",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "pytest -q > ./tmp/out.log 2>&1"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "pass_tool_output_tee",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "npm test 2>&1 | tee ./tmp/test.log"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "pass_python_heredoc_read_only",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 - <<'EOF'\nimport sys\nsys.stdout.write(open('a').read())\nEOF"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "pass_echo_to_stdout_and_stderr",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "echo hola && echo error >&2 && echo x > /dev/null"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "pass_cat_heredoc_to_stdout",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "cat <<'EOF'\nresumen\nEOF"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "pass_echo_exit_status_to_log",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "pytest -q > tmp/e2e.log 2>&1; echo \"exit=$?\" >> tmp/e2e.log"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "pass_echo_variable_to_tmp",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "OLD=$(git rev-parse HEAD) && echo $OLD > tmp/old_head"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "block_bash_write_echo_literal_with_variable",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "echo \"export const URL = '$BASE/api/v1/clients/list'\" > src/url.ts"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "block_bash_write_sed_inplace_with_pipe_and_semicolon_in_quotes",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i -E 's/(a|b)\\(403\\)/\\1(503)/g; s/x: 403/x: 503/' tests/e2e/_api/escenarios.ts && rg -n 403 tests"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Edit"
+  },
+  {
+    "name": "block_git_dir_after_quoted_separator",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "rg -n 'a;b|c' src; echo x > .git/HEAD"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": ".git/"
+  },
+  {
+    "name": "ask_rm_tracked_after_heredoc_with_apostrophe",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 - <<'EOF'\nprint(\"don't\")\nEOF\nrm -f README.md"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "pass_git_commit_multiline_message_is_routine",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "git add -A && git commit -q -m \"fix: x\n\n- a > b; c | d\n- rm -rf no es un comando\""}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "pass_git_commit_heredoc_message",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "git commit -q -F - <<'EOF'\nfix: x\nEOF"}, "cwd": "{project}"},
     "expected_exit": 0
   }
 ]

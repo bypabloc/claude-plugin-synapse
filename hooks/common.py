@@ -475,12 +475,85 @@ def is_disposable_target(path: str, cwd: str) -> bool:
     return False
 
 
-def extract_bash_tokens(command: str) -> list[str]:
-    """Extrae sub-comandos separados por operadores de shell (&&, ||, ;, |)."""
-    command = re.sub(r"\\\n", " ", command)
+_SEPARATORS = ("&&", "||", ";", "|")
+_HEREDOC_START_RE = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+
+
+def _naive_split(command: str) -> list[str]:
     sep = re.compile(r"(\|\||&&|;|\||\n)")
-    parts = sep.split(command)
-    return [p.strip() for p in parts if p and not sep.fullmatch(p) and p.strip()]
+    return [p.strip() for p in sep.split(command) if p and not sep.fullmatch(p) and p.strip()]
+
+
+def extract_bash_tokens(command: str) -> list[str]:
+    """Extrae sub-comandos separados por operadores de shell (&&, ||, ;, |, salto de línea).
+
+    Respeta comillas: `sed 's/a|b/c/; s/x/y/'` es UN sub-comando (antes el `|` y el `;` entrecomillados lo
+    partían y el fragmento no se podía analizar). Los cuerpos de heredoc se emiten línea a línea sin
+    interpretar comillas, para que un apóstrofo en el cuerpo no oculte los comandos siguientes. Con una
+    comilla sin cerrar se vuelve al corte ingenuo, que es el conservador.
+    """
+    command = re.sub(r"\\\n", " ", command)
+    parts: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    pending: list[str] = []  # delimitadores de heredoc abiertos en la línea actual
+    body_delims: list[str] = []
+
+    def flush() -> None:
+        if "".join(buf).strip():
+            parts.append("".join(buf).strip())
+        buf.clear()
+
+    for line in command.split("\n"):
+        if body_delims:
+            if line.strip() == body_delims[0]:
+                body_delims.pop(0)
+            elif line.strip():
+                parts.append(line.strip())
+            continue
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == "\\" and quote != "'" and i + 1 < len(line):
+                buf.append(line[i:i + 2])
+                i += 2
+                continue
+            if quote:
+                quote = None if ch == quote else quote
+                buf.append(ch)
+                i += 1
+                continue
+            if ch in "'\"":
+                quote = ch
+                buf.append(ch)
+                i += 1
+                continue
+            if line.startswith("<<<", i):
+                buf.append("<<<")
+                i += 3
+                continue
+            heredoc = _HEREDOC_START_RE.match(line, i)
+            if heredoc:
+                pending.append(heredoc.group(2))
+                buf.append(heredoc.group(0))
+                i = heredoc.end()
+                continue
+            sep = next((s for s in _SEPARATORS if line.startswith(s, i)), None)
+            if sep:
+                flush()
+                i += len(sep)
+                continue
+            buf.append(ch)
+            i += 1
+        if quote:
+            buf.append("\n")  # string multilínea (p. ej. mensaje de commit): sigue el mismo sub-comando
+            continue
+        flush()
+        body_delims, pending = pending, []
+    if quote:
+        return _naive_split(command)
+    flush()
+    return parts
 
 
 def parse_command_targets(subcmd: str) -> tuple[str, list[str]]:

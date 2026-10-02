@@ -107,8 +107,13 @@ Claude Code invoca los scripts en `hooks/` pasando una carga útil JSON vía `st
   - Cualquier escritura en `.git/` con comandos de archivos (`rm`, `mv`, `cp` hacia, `sed -i`, `tee`, `>`/`>>`, `find -delete`...). Los comandos `git` no se ven afectados.
   - Cualquier escritura fuera de la raíz del proyecto (toplevel git del `cwd`), siguiendo `cd` dentro del comando. Excepciones: scratchpad `/tmp/claude-*` y `/dev/null`/`/dev/std*`.
   - Ejecución de scripts remotos (`curl … | sh`), exfiltración de `~/.ssh`, `~/.aws`, `env` a la red, `authorized_keys`, shells reversas.
+  - Escritura de archivos con contenido redactado por el agente (`agent_authored_write`): `echo`/`printf` redirigidos, `cat`/`tee` con heredoc, `sed -i`/`perl -i`, scripts `python3 - <<EOF` o `-c`/`-e` que escriben archivos. Se debe usar `Write`/`Edit`. Permitido: salida de herramientas (`pytest > tmp/log`, `cmd | tee log`, `git`, builds) y `echo "exit=$?" >> log` (solo expansiones de shell).
 - **Confirmación determinista (`ask`)**, evaluada antes del auto-allow: force push, `reset --hard`, `filter-branch`, `DROP DATABASE`, `crontab -r`, `aws s3 rb`, `sudo rm`, `history -c`.
-- **Laya:** solo escala a `ask`, nunca bloquea; recibe el comando sin comentarios ni cuerpos de heredoc; los comandos rutinarios (`gh pr|run|issue`, `git status|add|commit|push`...) no pasan por Laya.
+- **Laya:** solo escala a `ask`, nunca bloquea; los comandos rutinarios (`gh pr|run|issue`, `git status|add|commit|push`...) no pasan por Laya.
+  - Entrada: `command_evidence()` (comando sin comentarios ni cuerpos de heredoc + efectos detectados: qué borra, escribe, lee o envía).
+  - Pregunta binaria `DANGER_QUESTION` con claves neutras `A`/`B`, siempre sobre el checkpoint `english`.
+  - Modelo: delta afinado (4 capas superiores + cabeza) en `models/laya-block-dangerous-delta.safetensors` (Git LFS) y calibración Platt en `models/laya-block-dangerous.json`. Si el delta es solo un puntero LFS, usa el perfil `zeroshot` calibrado.
+  - Re-entrenar: `scripts/laya_eval.py` (dataset, scoring, calibración, `export`) + `scripts/laya_finetune.py`. Cambiar la pregunta o la entrada invalida delta y calibración.
 - **Bloqueo Duro (Exit 2):**
   - Borrado de sistema o raíz (`rm -rf /`, `rm -rf ~`, `rm -rf $HOME`).
   - Borrado en `/tmp/` del sistema operativo (fuera de sesiones de Claude).
