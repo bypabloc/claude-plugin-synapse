@@ -1,0 +1,42 @@
+{
+  "description": "Guardrails de seguridad en tiempo real para interceptar herramientas Bash, Read, Edit y Write",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/block_dangerous.py\""
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/block_env_read.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "^(Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/protect_files.py\""
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/detect_secrets.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "^Read$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/block_env_read.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

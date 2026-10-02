@@ -1,0 +1,24 @@
+{
+  "name": "synapse",
+  "version": "1.0.0",
+  "description": "Sistema de guardrails de seguridad y protección determinística/neuronal en tiempo real para Claude Code (Laya System 1 + Fallback).",
+  "author": {
+    "name": "Pablo Contreras",
+    "email": "pacg1991@gmail.com",
+    "url": "https://github.com/bypabloc"
+  },
+  "homepage": "https://github.com/bypabloc/claude-plugin-synapse",
+  "repository": "https://github.com/bypabloc/claude-plugin-synapse",
+  "license": "MIT",
+  "keywords": [
+    "security",
+    "guardrails",
+    "hooks",
+    "pretooluse",
+    "laya",
+    "secrets-detection",
+    "env-protection",
+    "safety",
+    "claude-code"
+  ]
+}

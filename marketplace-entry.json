@@ -1,0 +1,16 @@
+{
+  "name": "synapse",
+  "description": "Sistema de guardrails de seguridad y protección determinística/neuronal en tiempo real para Claude Code (Laya System 1 + Fallback).",
+  "author": {
+    "name": "Pablo Contreras",
+    "email": "pacg1991@gmail.com",
+    "url": "https://github.com/bypabloc"
+  },
+  "category": "security",
+  "source": {
+    "source": "github",
+    "url": "https://github.com/bypabloc/claude-plugin-synapse.git",
+    "ref": "main"
+  },
+  "homepage": "https://github.com/bypabloc/claude-plugin-synapse"
+}
