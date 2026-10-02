@@ -273,16 +273,36 @@ def is_system_tmp(path: str, cwd: str) -> bool:
 
 
 def is_git_ignored(path: str, cwd: str) -> bool:
-    """Consulta a git check-ignore si la ruta está ignorada."""
+    """Consulta a git check-ignore si la ruta está ignorada en el repositorio del proyecto."""
     try:
-        res = subprocess.run(
-            ["git", "-C", cwd, "check-ignore", "-q", "--", path],
+        top_proc = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
             capture_output=True,
+            text=True,
             timeout=2,
         )
-        return res.returncode == 0
+        if top_proc.returncode != 0:
+            return False
+        toplevel = os.path.realpath(top_proc.stdout.strip())
+        claude_dir = os.path.realpath(str(Path.home() / ".claude"))
+        if toplevel == claude_dir or toplevel == os.path.realpath(str(Path.home())):
+            return False
+
+        res = subprocess.run(
+            ["git", "-C", cwd, "check-ignore", "-v", "--", path],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if res.returncode != 0:
+            return False
+        out = res.stdout.strip()
+        if any(ign in out for ign in ["personal/*", "cache/*", "plugins/*"]):
+            return False
+        return True
     except Exception:
         return False
+
 
 
 def is_disposable_target(path: str, cwd: str) -> bool:

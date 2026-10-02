@@ -1,4 +1,4 @@
-"""Módulo central y utilidades compartidas para los hooks de seguridad basados en Laya.
+"""Módulo central y utilidades compartidas para los hooks de seguridad de Synapse.
 
 Contexto y Propósito:
   Provee la infraestructura compartida para los hooks de seguridad de Claude Code:
@@ -7,14 +7,7 @@ Contexto y Propósito:
   - Gestión de entrada y salida del protocolo PreToolUse (stdin JSON, stdout JSON 'allow'/'ask', stderr exit 2).
   - Normalización de rutas y autorización incondicional de temporales (./tmp/**, /tmp/claude-*).
   - Inferencia y ofuscación de variables de entorno (describe formatos sin exponer secretos).
-
-Vínculos con la investigación en docs/research/laya/:
-  - docs/research/laya/04-el-router-y-multilingue.md:
-      Patrón Router singleton, precarga en memoria y orquestación de modelos.
-  - docs/research/laya/07-optimizacion-y-rendimiento.md:
-      Alineación de latencia P50 (~25ms en GPU) y limitación de hilos en CPU (torch.set_num_threads).
-  - docs/research/laya/10-tips-comunidad-antipatrones-y-limites-honestos.md:
-      Prevención de deadlocks con USE_TF=0, TOKENIZERS_PARALLELISM=false y calibración por answer_confidence.
+  - Auditoría persistente en logs (~/.claude/logs/security_hooks.log y logs/ locales).
 
 Ejemplos de Uso:
   >>> from common import is_disposable_target, should_use_laya, infer_format
@@ -38,16 +31,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Tip comunitario: Desactivar TensorFlow Abseil para evitar deadlocks en imports
+# Desactivar TensorFlow Abseil para evitar bloqueos en imports
 os.environ["USE_TF"] = "0"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-import torch
-import laya
-from laya import Router
+# Importación resiliente de Laya y PyTorch
+try:
+    import torch
+    import laya
+    from laya import Router
+    _LAYA_AVAILABLE = True
+except ImportError:
+    torch = None
+    laya = None
+    Router = None
+    _LAYA_AVAILABLE = False
 
 # Instancia singleton perezosa del Router
-_ROUTER_INSTANCE: Router | None = None
+_ROUTER_INSTANCE: Any = None
 
 # Segmentos de archivos y carpetas temporales autorizados automáticamente
 TMP_SEGMENT_RE = re.compile(r"(^|/)tmp(/|$)")
@@ -59,7 +60,7 @@ BUILD_ARTIFACT_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cac
 ENV_NAME_RE = re.compile(r"^\.env(\..+)?$|\.env$")
 TEMPLATE_SUFFIXES = (".example", ".sample", ".dist", ".template")
 
-# Patrones de archivos protegidos y de confirmacion requerida
+# Patrones de archivos protegidos y de confirmación requerida
 PROTECTED_PATTERNS = (
     ".env",
     "package-lock.json",
@@ -78,6 +79,8 @@ ASK_PATTERNS = (
 
 def is_cuda_available() -> bool:
     """Verifica si CUDA/GPU está disponible de forma segura."""
+    if not _LAYA_AVAILABLE or torch is None:
+        return False
     try:
         return torch.cuda.is_available()
     except Exception:
@@ -88,11 +91,14 @@ def should_use_laya() -> bool:
     """Determina si se debe utilizar Laya System 1 o activar el fallback de scripts originales.
 
     Reglas:
+      - Si Laya no está instalado en el entorno: False (fallback determinístico).
       - Si se especifica flag --fallback: False (usa los scripts originales de inmediato).
       - Si se especifica flag --cpu: True (fuerza inferencia de Laya en CPU).
       - Si se especifica flag --gpu: True si CUDA está disponible, False si no hay GPU (fallback).
       - Sin flags: Autodetecta CUDA. Si hay GPU activa Laya; si no hay GPU, activa el fallback.
     """
+    if not _LAYA_AVAILABLE:
+        return False
     if "--fallback" in sys.argv:
         return False
     if "--cpu" in sys.argv:
@@ -104,8 +110,10 @@ def should_use_laya() -> bool:
 
 def get_configured_device() -> str:
     """Determina el acelerador a utilizar según argv, variables de entorno o hardware detectado."""
+    if not _LAYA_AVAILABLE or torch is None:
+        return "cpu"
+
     if "--cpu" in sys.argv:
-        # Tip comunitario: Limitar hilos en CPU a núcleos físicos
         physical_cores = os.cpu_count() or 4
         target_threads = max(1, physical_cores // 2 if physical_cores > 4 else physical_cores)
         torch.set_num_threads(target_threads)
@@ -121,9 +129,11 @@ def get_configured_device() -> str:
     return "cuda" if is_cuda_available() else "cpu"
 
 
-def get_laya_router() -> Router:
+def get_laya_router() -> Any:
     """Retorna una instancia singleton precargada de Laya Router."""
     global _ROUTER_INSTANCE
+    if not _LAYA_AVAILABLE or Router is None:
+        raise RuntimeError("Laya System 1 no está disponible en este entorno. Opere en modo fallback.")
     if _ROUTER_INSTANCE is None:
         device = get_configured_device()
         _ROUTER_INSTANCE = Router(preload=True, device=device)
@@ -160,8 +170,8 @@ def notify_device_status() -> None:
         device = get_configured_device()
         if device == "cpu":
             sys.stderr.write(
-                "ℹ️ [INFO] Ejecutando Laya System 1 en CPU.\n"
-                "   Sugerencia: Para acelerar la inferencia a ~25ms, active CUDA/GPU o configure drivers NVIDIA.\n"
+                "ℹ️ [INFO] Ejecutando Synapse (Laya System 1) en CPU.\n"
+                "   Sugerencia: Para acelerar la inferencia a ~25ms, configure aceleración CUDA/GPU.\n"
             )
 
 
@@ -255,7 +265,7 @@ def resolve_path(path: str, cwd: str) -> str:
 
 
 def is_system_tmp(path: str, cwd: str) -> bool:
-    """Detecta si la ruta apunta a /tmp del sistema operativo fuera del scratchpad de sesion."""
+    """Detecta si la ruta apunta a /tmp del sistema operativo fuera del scratchpad de sesión."""
     resolved = resolve_path(path, cwd)
     if resolved == "/tmp" or resolved.startswith("/tmp/"):
         return not bool(SCRATCHPAD_RE.match(resolved))
@@ -263,26 +273,46 @@ def is_system_tmp(path: str, cwd: str) -> bool:
 
 
 def is_git_ignored(path: str, cwd: str) -> bool:
-    """Consulta a git check-ignore si la ruta esta ignorada."""
+    """Consulta a git check-ignore si la ruta está ignorada en el repositorio del proyecto."""
     try:
-        res = subprocess.run(
-            ["git", "-C", cwd, "check-ignore", "-q", "--", path],
+        top_proc = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
             capture_output=True,
+            text=True,
             timeout=2,
         )
-        return res.returncode == 0
+        if top_proc.returncode != 0:
+            return False
+        toplevel = os.path.realpath(top_proc.stdout.strip())
+        claude_dir = os.path.realpath(str(Path.home() / ".claude"))
+        if toplevel == claude_dir or toplevel == os.path.realpath(str(Path.home())):
+            return False
+
+        res = subprocess.run(
+            ["git", "-C", cwd, "check-ignore", "-v", "--", path],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if res.returncode != 0:
+            return False
+        out = res.stdout.strip()
+        if any(ign in out for ign in ["personal/*", "cache/*", "plugins/*"]):
+            return False
+        return True
     except Exception:
         return False
 
 
+
 def is_disposable_target(path: str, cwd: str) -> bool:
     """Verifica si una ruta es un archivo o directorio temporal desechable.
-    
-    Aprobado automaticamente:
+
+    Aprobado automáticamente:
       1. Rutas bajo ./tmp/ del proyecto.
-      2. Scratchpad de sesion (/tmp/claude-*).
+      2. Scratchpad de sesión (/tmp/claude-*).
       3. Directorios de build conocidos (dist, build, __pycache__, .pytest_cache).
-      4. Extensiones efimeras (*.pyc, *.tmp, *.log, *.cache).
+      4. Extensiones efímeras (*.pyc, *.tmp, *.log, *.cache).
       5. Archivos marcados por .gitignore.
     """
     if is_system_tmp(path, cwd):
@@ -295,7 +325,7 @@ def is_disposable_target(path: str, cwd: str) -> bool:
     if TMP_SEGMENT_RE.search(resolved):
         return True
 
-    # 2. Scratchpad de sesion
+    # 2. Scratchpad de sesión
     if SCRATCHPAD_RE.match(resolved):
         return True
 
@@ -362,7 +392,7 @@ def infer_format(value: str) -> str:
 
 
 def extract_keys_with_format(file_path: str) -> list[str]:
-    """Lee KEY=value por linea y devuelve 'KEY=<formato>' sin exponer ningun valor real."""
+    """Lee KEY=value por línea y devuelve 'KEY=<formato>' sin exponer ningún valor real."""
     try:
         text = Path(file_path).read_text(errors="replace")
     except Exception as exc:
@@ -382,7 +412,7 @@ def extract_keys_with_format(file_path: str) -> list[str]:
 
 
 def build_env_block_message(file_path: str) -> str:
-    """Construye un mensaje explicativo detallando como usar las variables sin leerlas."""
+    """Construye un mensaje explicativo detallando cómo usar las variables sin leerlas."""
     keys = extract_keys_with_format(file_path)
     lines = [
         f"🚫 BLOCKED: Lectura directa de archivo de credenciales: {file_path}",
