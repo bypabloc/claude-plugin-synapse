@@ -24,15 +24,15 @@ Vínculos con la investigación en docs/research/laya/:
 
 Ejemplos de Uso en CLI:
   # 1. Caso detección de secreto real (bloqueado):
-  $ echo '{"tool_name": "Edit", "tool_input": {"new_string": "OPENAI_KEY = \"sk-proj-ab12cd34ef56gh78ij90kl12mnop34\""}}' | python src/detect_secrets.py --gpu
+  $ echo '{"tool_name": "Edit", "tool_input": {"new_string": "OPENAI_KEY = \"sk-proj-ab12cd34ef56gh78ij90kl12mnop34\""}}' | python hooks/detect_secrets.py --gpu
   -> 🚨 Possible secret detected! Type: OpenAI API Key format [exit 2]
 
   # 2. Caso detección semántica por Laya (JWT):
-  $ echo '{"tool_name": "Edit", "tool_input": {"new_string": "JWT = \"eyJhbGciOiJIUzI1Ni...\""}}' | python src/detect_secrets.py --gpu
+  $ echo '{"tool_name": "Edit", "tool_input": {"new_string": "JWT = \"eyJhbGciOiJIUzI1Ni...\""}}' | python hooks/detect_secrets.py --gpu
   -> 🚨 Possible secret detected via Laya System 1! Detected credential category: api_token [exit 2]
 
   # 3. Caso placeholder seguro (permitido):
-  $ echo '{"tool_name": "Edit", "tool_input": {"new_string": "api_key = \"your-api-key-here\""}}' | python src/detect_secrets.py --gpu
+  $ echo '{"tool_name": "Edit", "tool_input": {"new_string": "api_key = \"your-api-key-here\""}}' | python hooks/detect_secrets.py --gpu
   -> [salida limpia, exit 0]
 """
 
@@ -47,7 +47,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from common import (
     emit_block,
+    emit_decision,
     get_laya_router,
+    log_step,
     read_hook_input,
     record_audit_log,
     should_use_laya,
@@ -100,7 +102,7 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> Non
 
     # Si contiene un placeholder o lectura de variable de entorno explícita, autorizar
     if PLACEHOLDER_RE.search(content):
-        record_audit_log("ALLOW", "detect_secrets", tool_name, content[:60], "Placeholder seguro detectado")
+        record_audit_log("ALLOW", "detect_secrets", tool_name, f"<{len(content)} caracteres>", "Placeholder seguro detectado")
         sys.exit(0)
 
     # 1. Chequeo preliminar con patrones de alta precisión
@@ -111,6 +113,7 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> Non
             found_pattern_desc = desc
             break
 
+    log_step("signatures", result="match" if found_pattern_desc else "no_match", category=found_pattern_desc, checked=len(HIGH_CONFIDENCE_PATTERNS))
     if found_pattern_desc:
         emit_block(
             f"🚨 Possible secret detected!\n"
@@ -119,7 +122,7 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> Non
             exit_code=2,
             hook_name="detect_secrets",
             tool_name=tool_name,
-            target=content[:60],
+            target=f"<{len(content)} caracteres>",
         )
 
     # 2. Si no es un patrón estático pero contiene asignaciones sospechosas, consultar a Laya System 1
@@ -133,27 +136,28 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> Non
             status = answers["secret_status"]["choice"]
             status_conf = answers["secret_status"]["answer_confidence"]
             secret_type = answers["secret_type"]["choice"]
+            log_step("laya", status=status, status_conf=round(status_conf, 3), secret_type=secret_type)
 
+            # Laya solo escala a confirmación: los bloqueos son las firmas deterministas de arriba
             if status == "confidential_secret" and status_conf >= 0.70 and secret_type != "none":
-                emit_block(
-                    f"🚨 Possible secret detected via Laya System 1!\n"
-                    f"Detected credential category: {secret_type} (confidence: {status_conf:.2f})\n"
-                    "Please remove sensitive credentials or reference environment variables instead.",
-                    exit_code=2,
+                emit_decision(
+                    "ask",
+                    f"Laya System 1 sospecha una credencial en el contenido ({secret_type}, confianza {status_conf:.2f}). "
+                    "Si es real, usa variables de entorno.",
                     hook_name="detect_secrets",
                     tool_name=tool_name,
-                    target=content[:60],
+                    target=f"<{len(content)} caracteres>",
                 )
         except Exception:
             # Fallback transparente a verificación por firmas estáticas
             pass
 
-    record_audit_log("ALLOW", "detect_secrets", tool_name, content[:60], "Contenido libre de secretos")
+    record_audit_log("ALLOW", "detect_secrets", tool_name, f"<{len(content)} caracteres>", "Contenido libre de secretos")
     sys.exit(0)
 
 
 def main() -> None:
-    data = read_hook_input()
+    data = read_hook_input("detect_secrets")
     if not data:
         sys.exit(0)
 

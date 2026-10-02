@@ -12,9 +12,10 @@ Cuando el usuario invoque este skill o solicite verificar el estado de Synapse:
    - Comprobar si CUDA/GPU está disponible mediante Python.
    - Indicar si el motor opera en modo GPU (~25ms), CPU (~700ms) o Fallback determinístico (<1ms).
 
-2. **Verificar Archivos de Auditoría**:
-   - Inspeccionar las últimas 10 líneas de `~/.claude/logs/security_hooks.log` o `./logs/security_hooks.log` si existen.
-   - Resumir las decisiones recientes: acciones aprobadas (`ALLOW`), consultas al usuario (`ASK`) y bloqueos (`BLOCKED`).
+2. **Verificar la Traza de Auditoría**:
+   - Ejecutar `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/synapse_log.py" --since 1h` (traza en `${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/AAAA-MM-DD.jsonl`).
+   - Para el detalle de bloqueos: `--decision block`; de confirmaciones: `--decision ask`.
+   - Resumir las decisiones recientes (`allow`, `ask`, `block`, `pass`) y el paso que las causó.
 
 3. **Verificar Políticas Activas**:
    - Auto-aprobación incondicional de temporales `./tmp/**`.

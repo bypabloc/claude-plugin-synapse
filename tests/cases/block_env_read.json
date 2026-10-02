@@ -1,0 +1,102 @@
+[
+  {
+    "name": "env_block_read_tool",
+    "payload": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "./tmp/test.env"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "expected_in_stderr": "DATABASE_URL=<URL",
+    "setup_file": {
+      "path": "./tmp/test.env",
+      "content": "# Archivo de prueba de entorno\nDATABASE_URL=postgres://user:secret@localhost:5432/mydb\nDEBUG=true\nPORT=8080\nAPI_SECRET=my-super-secret-pass-key-1234\n"
+    }
+  },
+  {
+    "name": "env_allow_read_template",
+    "payload": {
+      "tool_name": "Read",
+      "tool_input": {
+        "file_path": "./conf/.env.example"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 0
+  },
+  {
+    "name": "env_block_bash_cat",
+    "payload": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat ./tmp/test.env"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "expected_in_stderr": "DEBUG=<booleano>",
+    "setup_file": {
+      "path": "./tmp/test.env",
+      "content": "# Archivo de prueba de entorno\nDATABASE_URL=postgres://user:secret@localhost:5432/mydb\nDEBUG=true\nPORT=8080\nAPI_SECRET=my-super-secret-pass-key-1234\n"
+    }
+  },
+  {
+    "name": "env_block_bash_head",
+    "payload": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "head -n 20 ./tmp/test.env"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "expected_in_stderr": "PORT=<numerico",
+    "setup_file": {
+      "path": "./tmp/test.env",
+      "content": "# Archivo de prueba de entorno\nDATABASE_URL=postgres://user:secret@localhost:5432/mydb\nDEBUG=true\nPORT=8080\nAPI_SECRET=my-super-secret-pass-key-1234\n"
+    }
+  },
+  {
+    "name": "env_allow_source_command",
+    "payload": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "set -a; source ./tmp/test.env; set +a"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 0,
+    "setup_file": {
+      "path": "./tmp/test.env",
+      "content": "# Archivo de prueba de entorno\nDATABASE_URL=postgres://user:secret@localhost:5432/mydb\nDEBUG=true\nPORT=8080\nAPI_SECRET=my-super-secret-pass-key-1234\n"
+    }
+  },
+  {
+    "name": "env_allow_heredoc_write",
+    "payload": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cat > ./tmp/test.env << 'EOF'\nFOO=bar\nEOF"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 0
+  },
+  {
+    "name": "env_block_bash_awk",
+    "payload": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "awk '{print $0}' ./tmp/test.env"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "setup_file": {
+      "path": "./tmp/test.env",
+      "content": "# Archivo de prueba de entorno\nDATABASE_URL=postgres://user:secret@localhost:5432/mydb\nDEBUG=true\nPORT=8080\nAPI_SECRET=my-super-secret-pass-key-1234\n"
+    }
+  }
+]

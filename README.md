@@ -116,18 +116,32 @@ claude --plugin-dir "./claude-plugin-synapse"
 
 ## 5. Auditoría de Logs y Variables de Entorno
 
-Synapse incluye un motor de auditoría unificado y no intrusivo que registra cada decisión (`ALLOW`, `ASK`, `BLOCKED`) con timestamp y justificación técnica:
+Cada ejecución de un hook escribe **un paso por línea** (JSONL) en `${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/AAAA-MM-DD.jsonl`, agrupado por `run` y con el `session` de Claude Code. El contenido de `Write`/`Edit` nunca se registra y los tokens se enmascaran.
 
-```log
-[2026-10-02 00:19:15] [BLOCKED] [LAYA-CUDA  ] [block_dangerous  ] Tool: Bash  | Target: 'rm -rf /' | Reason: Comando catastrófico bloqueado preventivamente
-[2026-10-02 00:19:16] [ALLOW  ] [LAYA-CUDA  ] [block_dangerous  ] Tool: Bash  | Target: 'rm -f ./tmp/cache_item.json' | Reason: Operación en directorio temporal autorizada
+```bash
+python3 scripts/synapse_log.py --since 30m          # últimos 30 minutos (30m, 2h, 1d)
+python3 scripts/synapse_log.py --decision block     # allow | ask | block | pass
+python3 scripts/synapse_log.py --session 49c43f62 --hook block_dangerous
+python3 scripts/synapse_log.py --json | jq .        # JSONL crudo
+python3 scripts/synapse_log.py --follow             # en vivo
+```
+
+```
+━━ 2026-10-02 09:00:56.720 ━━ block_dangerous ━━ run 29e84acc ━━ session 49c43f62
+   tool    Bash
+   cwd     /home/bypabloc/projects/bypabloc/claude-plugin-synapse
+   engine  laya-cuda
+   input   rm -rf .git
+   ├─ regex.catastrophic       result=no_match  checked=21
+   ├─ structure.git_dir        result=match  subcmd=rm -rf .git  target=.../claude-plugin-synapse/.git
+   └─ DECISION  BLOCK  (24.4 ms)  Prohibido modificar .git/ (contiene todo el historial): 'rm' sobre .git.
 ```
 
 ### Configuración de Variables de Entorno:
 
 | Variable | Descripción | Valor por Defecto |
 | :--- | :--- | :--- |
-| `SYNAPSE_LOG_DIR` | Define un directorio específico y exclusivo para almacenar `security_hooks.log`. Ideal para entornos de testing y auditorías segregadas. | `~/.claude/logs/` o `CLAUDE_PLUGIN_DATA/logs/` |
+| `SYNAPSE_LOG_DIR` | Reemplaza el directorio de la traza JSONL (`AAAA-MM-DD.jsonl`). Ideal para testing. | `${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/` |
 | `SYNAPSE_DEBUG` | Activa mensajes informativos de diagnóstico y aceleración de hardware en `stderr` (`1` para activar). | Desactivado (`0`) para evitar ruido en terminal |
 | `LAYA_DEVICE` | Fuerza el acelerador para Laya (`cuda`, `cpu`, `mps`). | Autodetección de hardware (`cuda` si está disponible, sino `cpu`) |
 
@@ -135,24 +149,37 @@ Synapse incluye un motor de auditoría unificado y no intrusivo que registra cad
 
 ## 6. Verificación de Calidad y Pruebas
 
-Synapse cuenta con una batería de pruebas automatizadas que validan integridad estructural, logging segregado y ejecución en subprocesos aislados:
+Las pruebas usan `pytest` (`uv pip install -e ".[dev]"`) y se organizan así:
+
+```
+tests/
+├── conftest.py              # Opción --laya, logs aislados por test, limpieza de repos efímeros
+├── support.py               # Ejecución de hooks (in-process / shell), carga de casos, repos git efímeros
+├── cases/                   # Casos declarativos por hook (payload → exit / decisión / stderr)
+│   ├── block_dangerous.json
+│   ├── block_env_read.json
+│   ├── detect_secrets.json
+│   └── protect_files.json
+├── unit/                    # Un módulo por hook + reglas de common.py
+│   ├── test_block_dangerous.py    # Casos JSON + coherencia de señales Laya (mock)
+│   ├── test_block_env_read.py
+│   ├── test_detect_secrets.py
+│   ├── test_protect_files.py
+│   ├── test_disposable_targets.py # tmp/, scratchpad, build, gitignored, sin seguimiento
+│   ├── test_audit_log.py
+│   └── test_manifest.py
+└── e2e/
+    └── test_plugin_hooks.py # Pipeline PreToolUse completo desde hooks.json + traza y vista de logs
+```
 
 ```bash
-# 1. Validación estructural estricta del manifiesto del plugin
-claude plugin validate --strict .
-
-# 2. Pruebas unitarias de integridad y logging en directorio específico
-python3 -m unittest discover tests
-
-# 3. Suite completa de guardrails de seguridad (36 casos de prueba en GPU)
-python3 tests/test_hooks.py --gpu
-
-# 4. Suite completa de guardrails en modo Fallback determinístico (sin GPU)
-python3 tests/test_hooks.py --fallback
-
-# 5. Suite en subprocesos aislados (simula llamadas reales de Claude Code)
-python3 tests/test_hooks.py --fallback --subprocess
+claude plugin validate --strict .   # Manifiesto
+python3 -m pytest                   # Todo en modo fallback determinístico (~40 s)
+python3 -m pytest --laya gpu        # Con Laya System 1 en CUDA (--laya cpu para CPU)
+python3 -m pytest tests/e2e         # Solo e2e
 ```
+
+Para agregar un caso a un hook basta con sumar una entrada en `tests/cases/<hook>.json`. Los fragmentos que GitHub push protection detecta como secretos reales se escriben con marcadores (`{stripe_live_prefix}`) que `support.py` expande.
 
 ---
 

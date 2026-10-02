@@ -23,7 +23,7 @@ Vínculos con la investigación en docs/research/laya/:
 
 Ejemplos de Uso en CLI:
   # 1. Caso lectura directa con cat (bloqueado con inferencia de tipos):
-  $ echo '{"tool_name": "Bash", "tool_input": {"command": "cat .env"}}' | python src/block_env_read.py --gpu
+  $ echo '{"tool_name": "Bash", "tool_input": {"command": "cat .env"}}' | python hooks/block_env_read.py --gpu
   -> 🚫 BLOCKED: Lectura directa de archivo de credenciales: .env
      Si necesitas USAR las variables (no verlas), usa en Bash:
        set -a; source .env; set +a
@@ -32,11 +32,11 @@ Ejemplos de Uso en CLI:
        DEBUG=<booleano> [exit 2]
 
   # 2. Caso lectura con herramienta Read (bloqueado):
-  $ echo '{"tool_name": "Read", "tool_input": {"file_path": ".env.production"}}' | python src/block_env_read.py --gpu
+  $ echo '{"tool_name": "Read", "tool_input": {"file_path": ".env.production"}}' | python hooks/block_env_read.py --gpu
   -> 🚫 BLOCKED: Lectura directa de archivo de credenciales [exit 2]
 
   # 3. Caso carga legítima con source (permitido):
-  $ echo '{"tool_name": "Bash", "tool_input": {"command": "set -a; source .env; set +a"}}' | python src/block_env_read.py --gpu
+  $ echo '{"tool_name": "Bash", "tool_input": {"command": "set -a; source .env; set +a"}}' | python hooks/block_env_read.py --gpu
   -> [salida limpia, exit 0]
 """
 
@@ -54,8 +54,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (
     build_env_block_message,
     emit_block,
+    emit_decision,
     extract_bash_tokens,
     get_laya_router,
+    log_step,
     is_env_file,
     read_hook_input,
     record_audit_log,
@@ -125,6 +127,7 @@ def evaluate_bash_env_read(command: str, cwd: str) -> None:
 
     # 1. Chequeo rapido sintactico de comandos de lectura tradicionales
     hits = find_env_args_in_bash(command, cwd)
+    log_step("syntax.env_read", result="match" if hits else "no_match", hits=hits)
     if hits:
         record_audit_log("BLOCKED", "block_env_read", "Bash", hits[0], "Lectura directa de archivo .env con comando Bash")
         sys.stderr.write(build_env_block_message(hits[0]) + "\n")
@@ -165,26 +168,18 @@ def evaluate_bash_env_read(command: str, cwd: str) -> None:
 
             intent = answers["env_intent"]["choice"]
             conf = answers["env_intent"]["answer_confidence"]
+            log_step("laya", intent=intent, confidence=round(conf, 3))
 
+            # Laya solo escala a confirmación: los bloqueos de .env son las reglas sintácticas de arriba
             if intent == "read_or_exfiltrate" and conf >= 0.70:
-                match = re.search(r"([^\s;&|'\"]*\.env[^\s;&|'\"]*)", command)
-                env_path = match.group(1) if match else ".env"
-                resolved_env = resolve_path(env_path, cwd)
-
-                record_audit_log("BLOCKED", "block_env_read", "Bash", command, "Exfiltración semántica de .env detectada por Laya")
-                if os.path.exists(resolved_env):
-                    sys.stderr.write(build_env_block_message(resolved_env) + "\n")
-                else:
-                    emit_block(
-                        f"Intento semantico de lectura/exfiltracion de variables de entorno detectado.\n"
-                        f"Comando: {command}\n"
-                        f"Usa 'set -a; source <env-file>; set +a' para cargar variables sin exponer valores.",
-                        exit_code=2,
-                        hook_name="block_env_read",
-                        tool_name="Bash",
-                        target=command,
-                    )
-                sys.exit(2)
+                emit_decision(
+                    "ask",
+                    "Laya System 1 sospecha lectura de un archivo .env. "
+                    "Para cargar variables sin exponerlas usa 'set -a; source <env-file>; set +a'.",
+                    hook_name="block_env_read",
+                    tool_name="Bash",
+                    target=command,
+                )
         except Exception:
             # Fallback transparente a reglas determinísticas
             pass
@@ -194,7 +189,7 @@ def evaluate_bash_env_read(command: str, cwd: str) -> None:
 
 
 def main() -> None:
-    data = read_hook_input()
+    data = read_hook_input("block_env_read")
     if not data:
         sys.exit(0)
 

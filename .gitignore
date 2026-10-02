@@ -43,4 +43,4 @@ logs/*.log
 # Temp directories
 tmp/
 scratch/
-.test_dangerous_repo/
+.test_repos/

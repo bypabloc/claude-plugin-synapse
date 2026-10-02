@@ -1,6 +1,6 @@
 [project]
 name = "claude-plugin-synapse"
-version = "1.0.1"
+version = "1.0.2"
 description = "Real-time security guardrails and PreToolUse interceptors for Claude Code powered by Laya System 1"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,3 +13,8 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Temporales y caché dentro de ./tmp del proyecto
+addopts = "--basetemp=tmp/pytest -p no:cacheprovider"

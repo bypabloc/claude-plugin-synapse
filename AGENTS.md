@@ -34,10 +34,13 @@ claude-plugin-synapse/
 ├── skills/
 │   └── synapse-status/
 │       └── SKILL.md            # Skill slash command /synapse-status
+├── scripts/
+│   └── synapse_log.py          # Vista legible de la traza JSONL (filtros, --follow)
 ├── tests/
-│   ├── test_manifest.py        # Verificación estructural de manifiesto y componentes
-│   ├── test_logging.py         # Verificación de auditoría segregada (SYNAPSE_LOG_DIR)
-│   └── test_hooks.py           # Suite de 36 pruebas para los 4 hooks (GPU/CPU/Fallback)
+│   ├── conftest.py / support.py # Opción --laya, logs aislados, runners de hooks, repos git efímeros
+│   ├── cases/<hook>.json       # Casos declarativos por hook
+│   ├── unit/                   # Un módulo por hook + disposable targets, audit log, manifiesto
+│   └── e2e/                    # Pipeline PreToolUse completo desde hooks.json sobre un repo git real
 ├── marketplace-entry.json      # Metadatos para el catálogo bypabloc/claude-plugins
 ├── README.md                   # Documentación orientada a usuarios y desarrolladores
 └── AGENTS.md                   # Este manual técnico
@@ -99,7 +102,13 @@ Claude Code invoca los scripts en `hooks/` pasando una carga útil JSON vía `st
 ## 4. Políticas de Guardrails por Hook
 
 ### A. `block_dangerous.py` (Herramienta: `Bash`)
-- **Auto-Allow:** Comandos destructivos restringidos a `./tmp/**`, `/tmp/claude-*` o artefactos de build (`dist/`, `build/`, `.cache/`, `node_modules/`, `target/`).
+- **Auto-Allow:** Comandos destructivos restringidos a `./tmp/**`, `/tmp/claude-*`, artefactos de build (`dist/`, `build/`, `.cache/`, `node_modules/`, `target/`), rutas gitignoreadas o archivos (no directorios) sin seguimiento git.
+- **Bloqueo determinista (exit 2), antes que todo lo demás:**
+  - Cualquier escritura en `.git/` con comandos de archivos (`rm`, `mv`, `cp` hacia, `sed -i`, `tee`, `>`/`>>`, `find -delete`...). Los comandos `git` no se ven afectados.
+  - Cualquier escritura fuera de la raíz del proyecto (toplevel git del `cwd`), siguiendo `cd` dentro del comando. Excepciones: scratchpad `/tmp/claude-*` y `/dev/null`/`/dev/std*`.
+  - Ejecución de scripts remotos (`curl … | sh`), exfiltración de `~/.ssh`, `~/.aws`, `env` a la red, `authorized_keys`, shells reversas.
+- **Confirmación determinista (`ask`)**, evaluada antes del auto-allow: force push, `reset --hard`, `filter-branch`, `DROP DATABASE`, `crontab -r`, `aws s3 rb`, `sudo rm`, `history -c`.
+- **Laya:** solo escala a `ask`, nunca bloquea; recibe el comando sin comentarios ni cuerpos de heredoc; los comandos rutinarios (`gh pr|run|issue`, `git status|add|commit|push`...) no pasan por Laya.
 - **Bloqueo Duro (Exit 2):**
   - Borrado de sistema o raíz (`rm -rf /`, `rm -rf ~`, `rm -rf $HOME`).
   - Borrado en `/tmp/` del sistema operativo (fuera de sesiones de Claude).
@@ -119,7 +128,7 @@ Claude Code invoca los scripts en `hooks/` pasando una carga útil JSON vía `st
   - Llaves privadas criptográficas (`-----BEGIN RSA PRIVATE KEY-----`).
   - Tokens de proveedores: OpenAI (`sk-...`), Anthropic (`sk-ant-api03-...`), Google Gemini (`AIza...`), AWS (`AKIA...`), GitHub (`ghp_...`), Slack (`xoxb-...`), Stripe (`sk_live_...`).
   - Asignaciones explícitas de contraseñas en texto plano.
-  - Tokens y credenciales no catalogados detectados por Laya System 1 (`confidence >= 0.70`).
+- **Confirmación (`ask`):** credenciales no catalogadas que Laya System 1 sospecha (`confidence >= 0.70`). Laya nunca bloquea en ningún hook.
 
 ### D. `protect_files.py` (Herramientas: `Edit`, `Write`)
 - **Permitido:** Archivos de código fuente estándar y plantillas `.env.example`.
@@ -130,40 +139,30 @@ Claude Code invoca los scripts en `hooks/` pasando una carga útil JSON vía `st
 
 ## 5. Sistema de Logging y Auditoría
 
-La función `record_audit_log` en `hooks/common.py` registra de manera uniforme todos los eventos:
+Cada ejecución de un hook deja una traza **JSONL, una línea por paso**, en un único directorio:
 
-- **Rutas de Almacenamiento (orden de resolución):**
-  1. `$SYNAPSE_LOG_DIR/security_hooks.log` (prioridad máxima; mandatorio para testing).
-  2. `$CLAUDE_PLUGIN_DATA/logs/security_hooks.log` (runtime de Claude Code).
-  3. `~/.claude/logs/security_hooks.log` (directorio global).
-  4. `./logs/security_hooks.log` (local en repositorio).
-- **Formato de Registro:**
-  ```
-  [YYYY-MM-DD HH:MM:SS] [ACCION ] [MODO_DISPOSITIVO] [NOMBRE_HOOK      ] Tool: HERRAMIENTA | Target: 'OBJETIVO' | Reason: MOTIVO
-  ```
+- **Ubicación:** `${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/AAAA-MM-DD.jsonl` (`$SYNAPSE_LOG_DIR` la reemplaza; lo usan los tests).
+- **Campos comunes:** `ts`, `run` (id por ejecución), `session` (8 primeros caracteres del `session_id` de Claude Code), `hook`, `tool`, `step`.
+- **Pasos:** `input` (cwd, motor, comando o ruta) → pasos intermedios (`regex.catastrophic`, `structure.*`, `regex.ask`, `laya`, `signatures`...) → `decision` (`allow | ask | block | pass`, `reason`, `ms`).
+- **Privacidad:** el contenido de `Write`/`Edit` nunca se registra (solo `content_chars`); tokens con formato conocido y asignaciones de credenciales se enmascaran (`common.redact`).
+- **API:** `read_hook_input("<hook>")` abre la traza, `log_step(step, **campos)` agrega pasos, `emit_decision`/`emit_block`/`record_audit_log` escriben la decisión.
+- **Vista legible:** `python3 scripts/synapse_log.py [--since 30m] [--decision block] [--hook X] [--session Y] [--json] [--follow]`.
 
 ---
 
 ## 6. Procedimientos de Verificación y Testing
 
-Toda modificación debe verificarse ejecutando los tres niveles de prueba:
+Toda modificación debe verificarse en ambos motores:
 
 ```bash
-# 1. Integridad estructural y auditoría segregada en ./tmp/test_audit_logs/
-python3 -m unittest discover tests
-
-# 2. Batería completa de guardrails en GPU (CUDA)
-python3 tests/test_hooks.py --gpu
-
-# 3. Batería completa en modo Fallback determinístico
-python3 tests/test_hooks.py --fallback
-
-# 4. Batería en subprocesos independientes
-python3 tests/test_hooks.py --fallback --subprocess
-
-# 5. Validación oficial del plugin
-claude plugin validate --strict .
+python3 -m pytest                  # Fallback determinístico: unit + e2e
+python3 -m pytest --laya gpu       # Laya System 1 en CUDA (--laya cpu para CPU)
+claude plugin validate --strict .  # Validación oficial del plugin
 ```
+
+- Casos nuevos de un hook: agregarlos a `tests/cases/<hook>.json` (no requiere código).
+- Repos git de prueba: `support.make_git_repo` los crea en `.test_repos/` (fuera de `tmp/`, porque cualquier segmento `/tmp/` vuelve desechable la ruta completa).
+- Secretos falsos que GitHub push protection rechaza: usar marcadores de `support.PLACEHOLDERS`.
 
 ---
 

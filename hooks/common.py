@@ -7,7 +7,8 @@ Contexto y Propósito:
   - Gestión de entrada y salida del protocolo PreToolUse (stdin JSON, stdout JSON 'allow'/'ask', stderr exit 2).
   - Normalización de rutas y autorización incondicional de temporales (./tmp/**, /tmp/claude-*).
   - Inferencia y ofuscación de variables de entorno (describe formatos sin exponer secretos).
-  - Auditoría persistente en logs (~/.claude/logs/security_hooks.log y logs/ locales).
+  - Traza JSONL de cada paso en ${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/AAAA-MM-DD.jsonl
+    (vista legible: scripts/synapse_log.py).
 
 Ejemplos de Uso:
   >>> from common import is_disposable_target, should_use_laya, infer_format
@@ -155,29 +156,103 @@ def get_laya_router() -> Any:
     return _ROUTER_INSTANCE
 
 
-def get_log_paths() -> list[Path]:
-    """Retorna las rutas destino para el log de auditoría según configuración y entorno."""
-    paths: list[Path] = []
+def get_log_dir() -> Path:
+    """Directorio único de logs: $SYNAPSE_LOG_DIR (tests) o ${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse."""
+    override = os.environ.get("SYNAPSE_LOG_DIR")
+    if override:
+        return Path(override).expanduser()
+    claude_dir = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    return Path(claude_dir).expanduser() / "logs" / "synapse"
 
-    # 1. Directorio explícito configurado por variable de entorno (prioridad máxima para pruebas y testing)
-    env_log_dir = os.environ.get("SYNAPSE_LOG_DIR")
-    if env_log_dir:
-        paths.append(Path(env_log_dir).expanduser() / "security_hooks.log")
-        return paths
 
-    # 2. Directorio persistente de datos del plugin si está en el runtime de Claude Code
-    plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if plugin_data:
-        paths.append(Path(plugin_data).expanduser() / "logs" / "security_hooks.log")
+def get_log_file(day: datetime | None = None) -> Path:
+    return get_log_dir() / f"{(day or datetime.now()):%Y-%m-%d}.jsonl"
 
-    # 3. Log centralizado global de Claude Code
-    paths.append(Path.home() / ".claude" / "logs" / "security_hooks.log")
 
-    # 4. Directorio logs local del repositorio/plugin
-    repo_log_dir = Path(__file__).resolve().parent.parent / "logs"
-    paths.append(repo_log_dir / "security_hooks.log")
+# Tokens con formato conocido y asignaciones de credenciales: nunca se escriben completos en el log
+_REDACT_RES = [
+    re.compile(r"(sk-ant-|sk-proj-|sk-|sk_live_|sk_test_|rk_live_|AKIA|ghp_|gho_|ghs_|github_pat_|xox[baprs]-|AIza|eyJ)[A-Za-z0-9_\-.]{6,}"),
+    # Asignaciones (password=x, TOKEN: x) y flags (--password x); "auth token --user" no es un valor
+    re.compile(r"(?i)\b(\w*(?:password|passwd|secret|token|api[_-]?key))(\s*[:=]\s*)(['\"]?)(?!\$)[^\s'\";&|]{4,}"),
+    re.compile(r"(?i)(--(?:password|passwd|token|api[_-]?key|secret)\s+)(['\"]?)[^\s'\";&|-][^\s'\";&|]{3,}"),
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9_\-.=]{8,}"),
+]
 
-    return paths
+
+def redact(text: str) -> str:
+    text = _REDACT_RES[0].sub(lambda m: m.group(1) + "…[REDACTED]", text)
+    text = _REDACT_RES[1].sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}[REDACTED]", text)
+    text = _REDACT_RES[2].sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", text)
+    return _REDACT_RES[3].sub(lambda m: m.group(1) + "[REDACTED]", text)
+
+
+_TRACE: dict[str, Any] = {}
+_MAX_FIELD = 2000
+
+
+def _clean(value: Any) -> Any:
+    if isinstance(value, str):
+        value = redact(value)
+        return value if len(value) <= _MAX_FIELD else value[:_MAX_FIELD] + f"…(+{len(value) - _MAX_FIELD})"
+    if isinstance(value, dict):
+        return {k: _clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clean(v) for v in value]
+    return value
+
+
+def start_trace(hook_name: str, data: dict[str, Any]) -> None:
+    """Abre una ejecución: run_id propio, sesión de Claude Code y paso 'input'."""
+    _TRACE.clear()
+    _TRACE.update(
+        run=os.urandom(4).hex(),
+        session=str(data.get("session_id") or "-")[:8],
+        hook=hook_name,
+        tool=data.get("tool_name", ""),
+        t0=datetime.now(),
+    )
+    tool_input = data.get("tool_input", {}) or {}
+    summary: dict[str, Any] = {"cwd": data.get("cwd", "")}
+    if "command" in tool_input:
+        summary["command"] = tool_input["command"]
+    if "file_path" in tool_input:
+        summary["file_path"] = tool_input["file_path"]
+    # El contenido de Write/Edit nunca se registra: puede ser justamente el secreto que se bloquea
+    for key in ("content", "new_string"):
+        if key in tool_input:
+            summary[f"{key}_chars"] = len(tool_input[key] or "")
+    summary["engine"] = engine_mode()
+    log_step("input", **summary)
+
+
+def engine_mode() -> str:
+    try:
+        return f"laya-{get_configured_device()}" if should_use_laya() else "fallback"
+    except Exception:
+        return "fallback"
+
+
+def log_step(step: str, **fields: Any) -> None:
+    """Escribe un paso de la ejecución actual como una línea JSON (append, tolerante a fallos)."""
+    try:
+        now = datetime.now()
+        record = {
+            "ts": now.isoformat(timespec="milliseconds"),
+            "run": _TRACE.get("run", "-"),
+            "session": _TRACE.get("session", "-"),
+            "hook": _TRACE.get("hook", "-"),
+            "tool": _TRACE.get("tool", ""),
+            "step": step,
+            **_clean(fields),
+        }
+        if step == "decision" and "t0" in _TRACE:
+            record["ms"] = round((now - _TRACE["t0"]).total_seconds() * 1000, 1)
+        path = get_log_file(now)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 _STATUS_NOTIFIED = False
@@ -208,48 +283,33 @@ def notify_device_status() -> None:
             )
 
 
+# "ALLOW" en llamadas directas de los hooks significa "sin opinión" (exit 0 sin JSON): Claude Code decide
+_DECISION_NAMES = {"ALLOW": "pass", "PASSED": "pass", "ASK": "ask", "BLOCKED": "block", "allow": "allow", "ask": "ask"}
+
+
 def record_audit_log(
-    action: str,  # "ALLOW" | "ASK" | "BLOCKED" | "PASSED"
+    action: str,
     hook_name: str = "hook",
     tool_name: str = "",
     target: str = "",
     reason: str = "",
 ) -> None:
-    """Registra de forma persistente la decisión del hook en los archivos de log de la PC."""
-    try:
-        device_mode = "FALLBACK"
-        if should_use_laya():
-            device_mode = f"LAYA-{get_configured_device().upper()}"
-
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        clean_target = " ".join(target.split())[:140] if target else "(none)"
-        clean_reason = " ".join(reason.split())[:200]
-        log_line = (
-            f"[{timestamp}] [{action:7s}] [{device_mode:11s}] [{hook_name:17s}] "
-            f"Tool: {tool_name:5s} | Target: '{clean_target}' | Reason: {clean_reason}\n"
-        )
-
-        for p in get_log_paths():
-            try:
-                p.parent.mkdir(parents=True, exist_ok=True)
-                with open(p, "a", encoding="utf-8") as f:
-                    f.write(log_line)
-            except Exception:
-                pass
-    except Exception:
-        pass
+    """Registra el paso final 'decision' de la ejecución actual."""
+    if not _TRACE:
+        _TRACE.update(run=os.urandom(4).hex(), session="-", hook=hook_name, tool=tool_name, t0=datetime.now())
+    log_step("decision", decision=_DECISION_NAMES.get(action, action.lower()), target=target, reason=reason)
 
 
-def read_hook_input() -> dict[str, Any]:
-    """Lee y parsea la carga útil JSON enviada por Claude Code en stdin y notifica estado de hardware."""
+def read_hook_input(hook_name: str = "hook") -> dict[str, Any]:
+    """Lee el JSON de stdin enviado por Claude Code y abre la traza de la ejecución."""
     notify_device_status()
     try:
         raw = sys.stdin.read()
-        if not raw or not raw.strip():
-            return {}
-        return json.loads(raw)
+        data = json.loads(raw) if raw and raw.strip() else {}
     except Exception:
-        return {}
+        data = {}
+    start_trace(hook_name, data)
+    return data
 
 
 def emit_decision(
@@ -260,8 +320,7 @@ def emit_decision(
     target: str = "",
 ) -> None:
     """Emite una decisión formal ('allow' o 'ask') al stdout en formato PreToolUse y la audita en log."""
-    action = "ALLOW" if decision.lower() == "allow" else "ASK"
-    record_audit_log(action, hook_name, tool_name, target, reason)
+    record_audit_log(decision.lower(), hook_name, tool_name, target, reason)
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -289,7 +348,7 @@ def emit_block(
 def resolve_path(path: str, cwd: str) -> str:
     """Normaliza y resuelve una ruta contra el directorio de trabajo."""
     try:
-        p = Path(path).expanduser()
+        p = Path(os.path.expandvars(path)).expanduser()
         if not p.is_absolute():
             p = Path(cwd) / p
         return os.path.normpath(str(p))
@@ -321,8 +380,9 @@ def is_git_ignored(path: str, cwd: str) -> bool:
         if toplevel == claude_dir or toplevel == os.path.realpath(str(Path.home())):
             return False
 
+        # Ruta resuelta: git no expande '~', y '~/.ssh/x' literal coincidía con el patrón '*~' del .gitignore
         res = subprocess.run(
-            ["git", "-C", cwd, "check-ignore", "-v", "--", path],
+            ["git", "-C", cwd, "check-ignore", "-v", "--", resolve_path(path, cwd)],
             capture_output=True,
             text=True,
             timeout=2,
@@ -431,10 +491,80 @@ def parse_command_targets(subcmd: str) -> tuple[str, list[str]]:
         return "", []
     if not tokens:
         return "", []
+    # Asignaciones de entorno (VAR=x cmd) y envoltorios (sudo rm ...) no son el comando real
+    while tokens and (re.match(r"^[A-Za-z_]\w*=", tokens[0]) or tokens[0] in COMMAND_WRAPPERS):
+        tokens = tokens[1:]
+        while tokens and tokens[0].startswith("-"):  # flags del envoltorio (sudo -E, nice -n 5)
+            tokens = tokens[1:]
+            if tokens and tokens[0].isdigit():
+                tokens = tokens[1:]
+    if not tokens:
+        return "", []
     cmd = os.path.basename(tokens[0])
-    args = tokens[1:]
-    paths: list[str] = [tok for tok in args if not tok.startswith("-")]
+    paths: list[str] = []
+    skip_next = False
+    for tok in tokens[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if REDIRECT_OP_RE.fullmatch(tok) or tok in {"<", "<<", "<<<"}:
+            skip_next = True
+            continue
+        if REDIRECT_GLUED_RE.match(tok) or tok.startswith(("-", "<")):
+            continue
+        paths.append(tok)
     return cmd, paths
+
+
+COMMAND_WRAPPERS = {"sudo", "doas", "nohup", "time", "command", "exec", "nice", "ionice", "env"}
+REDIRECT_OP_RE = re.compile(r"(\d|&)?>{1,2}\|?")
+REDIRECT_GLUED_RE = re.compile(r"^(\d|&)?>{1,2}\|?(.+)$")
+HARMLESS_DEVICES = ("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin", "/dev/tty", "/dev/fd/")
+
+
+def redirect_targets(subcmd: str) -> list[str]:
+    """Rutas a las que un sub-comando redirige su salida (>, >>, 2>, &>). Ignora duplicaciones de fd (>&2)."""
+    try:
+        tokens = shlex.split(subcmd, posix=True)
+    except ValueError:
+        return []
+    targets: list[str] = []
+    for i, tok in enumerate(tokens):
+        if REDIRECT_OP_RE.fullmatch(tok) and i + 1 < len(tokens):
+            targets.append(tokens[i + 1])
+            continue
+        glued = REDIRECT_GLUED_RE.match(tok)
+        if glued:
+            targets.append(glued.group(2))
+    return [t for t in targets if not t.startswith("&")]
+
+
+def project_root(cwd: str) -> str:
+    """Raíz del entorno de ejecución: toplevel git del cwd, o el propio cwd si no es un repo."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=2
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return os.path.realpath(proc.stdout.strip())
+    except Exception:
+        pass
+    return os.path.realpath(cwd)
+
+
+def is_outside_project(path: str, cwd: str, root: str) -> bool:
+    """True si la ruta resuelta cae fuera de root. Excepciones: scratchpad de sesión y dispositivos inocuos.
+
+    Una ruta con variables sin resolver ($DIR/x) no es decidible aquí: se trata como interna y queda a cargo
+    de las demás reglas (los borrados no desechables piden confirmación).
+    """
+    resolved = resolve_path(path, cwd)
+    if "$" in resolved:
+        return False
+    if SCRATCHPAD_RE.match(resolved) or resolved.startswith(HARMLESS_DEVICES):
+        return False
+    real = os.path.realpath(resolved)
+    return not (real == root or real.startswith(root.rstrip(os.sep) + os.sep))
 
 
 def is_env_file(path: str) -> bool:

@@ -25,15 +25,15 @@ Vínculos con la investigación en docs/research/laya/:
 
 Ejemplos de Uso en CLI:
   # 1. Caso modificación de lockfile (bloqueado duro):
-  $ echo '{"tool_name": "Edit", "tool_input": {"file_path": "package-lock.json"}}' | python src/protect_files.py --gpu
+  $ echo '{"tool_name": "Edit", "tool_input": {"file_path": "package-lock.json"}}' | python hooks/protect_files.py --gpu
   -> 🚫 BLOCKED: Cannot modify protected file or directory: package-lock.json [exit 2]
 
   # 2. Caso modificación de hooks/settings (solicita confirmación):
-  $ echo '{"tool_name": "Edit", "tool_input": {"file_path": ".claude/settings.json"}}' | python src/protect_files.py --gpu
+  $ echo '{"tool_name": "Edit", "tool_input": {"file_path": ".claude/settings.json"}}' | python hooks/protect_files.py --gpu
   -> {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask", ...}} [exit 0]
 
   # 3. Caso plantilla de entorno (permitido):
-  $ echo '{"tool_name": "Write", "tool_input": {"file_path": ".env.example"}}' | python src/protect_files.py --gpu
+  $ echo '{"tool_name": "Write", "tool_input": {"file_path": ".env.example"}}' | python hooks/protect_files.py --gpu
   -> [salida limpia, exit 0]
 """
 
@@ -53,6 +53,7 @@ from common import (
     emit_block,
     emit_decision,
     get_laya_router,
+    log_step,
     read_hook_input,
     record_audit_log,
     resolve_path,
@@ -91,6 +92,7 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
         record_audit_log("ALLOW", "protect_files", tool_name, file_path, "Plantilla de configuración editable autorizada")
         sys.exit(0)
 
+    log_step("paths", resolved=norm_path, in_protected_dir=in_protected_dir, template=is_editable_template)
     # 3. Bloqueo determinístico para patrones protegidos críticos
     if in_protected_dir or any(pat in norm_path or pat == file_name for pat in PROTECTED_PATTERNS):
         emit_block(
@@ -120,17 +122,10 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
 
             sensitivity = answers["file_sensitivity"]["choice"]
             confidence = answers["file_sensitivity"]["answer_confidence"]
+            log_step("laya", sensitivity=sensitivity, confidence=round(confidence, 3))
 
-            if sensitivity == "critical_blocked" and confidence >= 0.70:
-                emit_block(
-                    f"Target file classified as critical/protected by Laya System 1: {file_path}",
-                    exit_code=2,
-                    hook_name="protect_files",
-                    tool_name=tool_name,
-                    target=file_path,
-                )
-
-            if sensitivity == "ask_confirmation" and confidence >= 0.70:
+            # Laya solo escala a confirmación: los bloqueos son los patrones deterministas de arriba
+            if sensitivity in {"critical_blocked", "ask_confirmation"} and confidence >= 0.70:
                 emit_decision(
                     "ask",
                     f"Target file classified as sensitive config by Laya System 1: {file_path}",
@@ -147,7 +142,7 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
 
 
 def main() -> None:
-    data = read_hook_input()
+    data = read_hook_input("protect_files")
     if not data:
         sys.exit(0)
 

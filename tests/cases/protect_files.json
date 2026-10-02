@@ -1,0 +1,108 @@
+[
+  {
+    "name": "protect_block_git_dir",
+    "payload": {
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": ".git/config"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "expected_in_stderr": "cannot modify protected"
+  },
+  {
+    "name": "protect_block_lockfile_package",
+    "payload": {
+      "tool_name": "Edit",
+      "tool_input": {
+        "file_path": "package-lock.json"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "expected_in_stderr": "cannot modify protected"
+  },
+  {
+    "name": "protect_block_lockfile_uv",
+    "payload": {
+      "tool_name": "Edit",
+      "tool_input": {
+        "file_path": "uv.lock"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "expected_in_stderr": "cannot modify protected"
+  },
+  {
+    "name": "protect_block_env_file",
+    "payload": {
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": ".env"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "expected_in_stderr": "cannot modify protected"
+  },
+  {
+    "name": "protect_block_venv_internal",
+    "payload": {
+      "tool_name": "Edit",
+      "tool_input": {
+        "file_path": ".venv/bin/activate"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 2,
+    "expected_in_stderr": "cannot modify protected"
+  },
+  {
+    "name": "protect_allow_env_example_template",
+    "payload": {
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": ".env.example"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 0
+  },
+  {
+    "name": "protect_ask_claude_settings",
+    "payload": {
+      "tool_name": "Edit",
+      "tool_input": {
+        "file_path": ".claude/settings.json"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "protect_ask_claude_hooks",
+    "payload": {
+      "tool_name": "Edit",
+      "tool_input": {
+        "file_path": ".claude/hooks/block-dangerous.py"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "protect_allow_standard_source",
+    "payload": {
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": "src/services/payment.py"
+      },
+      "cwd": "{project}"
+    },
+    "expected_exit": 0
+  }
+]
