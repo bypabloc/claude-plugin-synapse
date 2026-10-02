@@ -66,6 +66,7 @@ from common import (
 READ_COMMANDS = {
     "cat", "head", "tail", "less", "more", "batcat", "bat",
     "awk", "sed", "grep", "egrep", "fgrep", "cut", "xxd", "base64",
+    "strings", "hexdump", "od", "nl", "pr", "view", "nano", "vim", "vi",
 }
 
 ENV_INTENT_QUESTIONS = {
@@ -140,6 +141,20 @@ def evaluate_bash_env_read(command: str, cwd: str) -> None:
         if not any(f"| {rc}" in command or f"|{rc}" in command for rc in READ_COMMANDS):
             record_audit_log("ALLOW", "block_env_read", "Bash", command, "Carga legítima mediante source autorizada")
             sys.exit(0)
+
+    # Detección determinística de lectura mediante scripts de una línea (Python, Node, Ruby, Perl)
+    scripting_read_pat = r"(?i)(?:python\d*|node|perl|ruby|php)\s+.*(?:\.read\(|readFileSync|open\(|file_get_contents).*\.env"
+    if re.search(scripting_read_pat, command):
+        record_audit_log("BLOCKED", "block_env_read", "Bash", command, "Lectura programática de .env detectada")
+        emit_block(
+            f"Intento de lectura directa/programática de archivo .env detectado.\n"
+            f"Comando: {command}\n"
+            f"Usa 'set -a; source <env-file>; set +a' para cargar variables en el proceso sin exponer valores.",
+            exit_code=2,
+            hook_name="block_env_read",
+            tool_name="Bash",
+            target=command,
+        )
 
     # 2. Evaluación semántica con Laya System 1 (si GPU/CUDA está disponible o se solicitó Laya)
     if should_use_laya():

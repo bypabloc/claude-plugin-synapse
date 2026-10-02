@@ -57,6 +57,14 @@ class TestSynapsePluginManifest(unittest.TestCase):
         rule_path = os.path.join(self.plugin_root, "rules", "security-guardrails.md")
         self.assertTrue(os.path.isfile(rule_path), "Falta rules/security-guardrails.md")
 
+    def test_documentation_files_exist(self):
+        readme_path = os.path.join(self.plugin_root, "README.md")
+        agents_path = os.path.join(self.plugin_root, "AGENTS.md")
+        self.assertTrue(os.path.isfile(readme_path), "Falta README.md en la raíz del plugin")
+        self.assertTrue(os.path.isfile(agents_path), "Falta AGENTS.md en la raíz del plugin")
+        self.assertGreater(os.path.getsize(readme_path), 500, "README.md está vacío o incompleto")
+        self.assertGreater(os.path.getsize(agents_path), 500, "AGENTS.md está vacío o incompleto")
+
 
 if __name__ == "__main__":
     unittest.main()

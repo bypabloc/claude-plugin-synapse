@@ -53,8 +53,15 @@ _ROUTER_INSTANCE: Any = None
 # Segmentos de archivos y carpetas temporales autorizados automáticamente
 TMP_SEGMENT_RE = re.compile(r"(^|/)tmp(/|$)")
 SCRATCHPAD_RE = re.compile(r"^/tmp/claude-[^/]*(/|$)")
-BUILD_ARTIFACT_EXTS = {".pyc", ".pyo", ".pyd", ".tmp", ".log", ".cache", ".bak"}
-BUILD_ARTIFACT_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", "dist", "build"}
+BUILD_ARTIFACT_EXTS = {
+    ".pyc", ".pyo", ".pyd", ".tmp", ".log", ".cache", ".bak",
+    ".coverage", ".tsbuildinfo", ".swp", ".swo",
+}
+BUILD_ARTIFACT_DIRS = {
+    "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
+    ".coverage", ".nyc_output", ".turbo", "dist", "build", ".next",
+    ".nuxt", ".angular", "target", "coverage", ".parcel-cache",
+}
 
 # Patrones para archivos .env y sufijos de plantillas
 ENV_NAME_RE = re.compile(r"^\.env(\..+)?$|\.env$")
@@ -64,16 +71,24 @@ TEMPLATE_SUFFIXES = (".example", ".sample", ".dist", ".template")
 PROTECTED_PATTERNS = (
     ".env",
     "package-lock.json",
+    "pnpm-lock.yaml",
     "bun.lock",
+    "bun.lockb",
     "yarn.lock",
     "uv.lock",
+    "poetry.lock",
+    "Cargo.lock",
+    "Gemfile.lock",
+    "composer.lock",
     ".git/",
     "node_modules/",
     ".venv/",
 )
 ASK_PATTERNS = (
     ".claude/settings.json",
+    ".claude/settings.local.json",
     ".claude/hooks/",
+    ".vscode/settings.json",
 )
 
 
@@ -140,31 +155,49 @@ def get_laya_router() -> Any:
     return _ROUTER_INSTANCE
 
 
-# Archivos de log de auditoría persistentes en la PC
-LOG_PATHS = [
-    Path.home() / ".claude" / "logs" / "security_hooks.log",
-    Path(__file__).resolve().parent.parent / "logs" / "security_hooks.log",
-]
+def get_log_paths() -> list[Path]:
+    """Retorna las rutas destino para el log de auditoría según configuración y entorno."""
+    paths: list[Path] = []
+
+    # 1. Directorio explícito configurado por variable de entorno (prioridad máxima para pruebas y testing)
+    env_log_dir = os.environ.get("SYNAPSE_LOG_DIR")
+    if env_log_dir:
+        paths.append(Path(env_log_dir).expanduser() / "security_hooks.log")
+        return paths
+
+    # 2. Directorio persistente de datos del plugin si está en el runtime de Claude Code
+    plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA")
+    if plugin_data:
+        paths.append(Path(plugin_data).expanduser() / "logs" / "security_hooks.log")
+
+    # 3. Log centralizado global de Claude Code
+    paths.append(Path.home() / ".claude" / "logs" / "security_hooks.log")
+
+    # 4. Directorio logs local del repositorio/plugin
+    repo_log_dir = Path(__file__).resolve().parent.parent / "logs"
+    paths.append(repo_log_dir / "security_hooks.log")
+
+    return paths
+
 
 _STATUS_NOTIFIED = False
 
 
 def notify_device_status() -> None:
-    """Emite información o advertencias sobre el modo de cómputo en stderr.
-
-    - Si cae de GPU a CPU: Imprime sugerencia informativa para habilitar aceleración.
-    - Si rechaza GPU y CPU (modo Fallback): Imprime advertencia indicando que la IA no funciona.
-    """
+    """Emite información o advertencias sobre el modo de cómputo en stderr solo en modo debug/verbose."""
     global _STATUS_NOTIFIED
     if _STATUS_NOTIFIED:
         return
     _STATUS_NOTIFIED = True
 
+    # Evitar ruido en stderr en sesiones estándar de Claude Code salvo que se pida debug/verbose
+    if not (os.environ.get("SYNAPSE_DEBUG") == "1" or "--verbose" in sys.argv or "--debug" in sys.argv):
+        return
+
     if not should_use_laya():
         sys.stderr.write(
             "⚠️ [WARNING] Motor Laya System 1 (GPU/CPU) desactivado o no disponible.\n"
             "   El script opera en modo FALLBACK determinístico (solo reglas estáticas).\n"
-            "   Para activar la IA, instale PyTorch con soporte CUDA/CPU y verifique las dependencias de Laya.\n"
         )
     else:
         device = get_configured_device()
@@ -196,7 +229,7 @@ def record_audit_log(
             f"Tool: {tool_name:5s} | Target: '{clean_target}' | Reason: {clean_reason}\n"
         )
 
-        for p in LOG_PATHS:
+        for p in get_log_paths():
             try:
                 p.parent.mkdir(parents=True, exist_ok=True)
                 with open(p, "a", encoding="utf-8") as f:
@@ -304,6 +337,39 @@ def is_git_ignored(path: str, cwd: str) -> bool:
         return False
 
 
+def is_git_untracked_file(path: str, cwd: str) -> bool:
+    """Detecta un archivo (no directorio) existente que git nunca ha rastreado en el repo del proyecto.
+
+    Cubre el caso típico del agente: crea un archivo de prueba y lo borra segundos después.
+    Los directorios quedan fuera porque pueden contener mucho trabajo nuevo sin commit.
+    """
+    resolved = resolve_path(path, cwd)
+    if not os.path.isfile(resolved) or os.path.islink(resolved):
+        return False
+    try:
+        parent = os.path.dirname(resolved)
+        top_proc = subprocess.run(
+            ["git", "-C", parent, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if top_proc.returncode != 0:
+            return False
+        toplevel = os.path.realpath(top_proc.stdout.strip())
+        home = Path.home()
+        if toplevel in (os.path.realpath(str(home / ".claude")), os.path.realpath(str(home))):
+            return False
+        res = subprocess.run(
+            ["git", "-C", parent, "ls-files", "--error-unmatch", "--", resolved],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return res.returncode != 0
+    except Exception:
+        return False
+
 
 def is_disposable_target(path: str, cwd: str) -> bool:
     """Verifica si una ruta es un archivo o directorio temporal desechable.
@@ -314,6 +380,7 @@ def is_disposable_target(path: str, cwd: str) -> bool:
       3. Directorios de build conocidos (dist, build, __pycache__, .pytest_cache).
       4. Extensiones efímeras (*.pyc, *.tmp, *.log, *.cache).
       5. Archivos marcados por .gitignore.
+      6. Archivos sin seguimiento git (no directorios).
     """
     if is_system_tmp(path, cwd):
         return False
@@ -339,6 +406,10 @@ def is_disposable_target(path: str, cwd: str) -> bool:
 
     # 5. Git ignored
     if is_git_ignored(path, cwd):
+        return True
+
+    # 6. Archivo sin seguimiento git (nunca fue parte del historial)
+    if is_git_untracked_file(path, cwd):
         return True
 
     return False
@@ -388,6 +459,12 @@ def infer_format(value: str) -> str:
         return "numerico decimal"
     if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", v):
         return f"URL, {length} caracteres"
+    if re.match(r"^eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$", v):
+        return f"token JWT, {length} caracteres"
+    if re.match(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", v):
+        return "UUID"
+    if re.fullmatch(r"[0-9a-fA-F]{32,64}", v):
+        return f"hash hex, {length} caracteres"
     return f"texto, {length} caracteres"
 
 

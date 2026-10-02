@@ -56,16 +56,19 @@ from common import (
 HIGH_CONFIDENCE_PATTERNS = [
     (r"-----BEGIN (?:RSA|OPENSSH|DSA|EC|PGP)?\s?PRIVATE KEY-----", "Private cryptographic key"),
     (r"sk-(?:proj-)?[a-zA-Z0-9_\-]{20,}", "OpenAI API Key format"),
-    (r"ghp_[a-zA-Z0-9]{36}", "GitHub Personal Access Token"),
+    (r"sk-ant-(?:api\d{2}-)?[a-zA-Z0-9_\-]{20,}", "Anthropic API Key format"),
+    (r"AIza[0-9A-Za-z\-_]{35}", "Google API / Gemini Key format"),
+    (r"gh[pousr]_[a-zA-Z0-9]{36,255}", "GitHub Access Token"),
     (r"AKIA[0-9A-Z]{16}", "AWS Access Key ID"),
     (r"xox[baprs]-[0-9a-zA-Z]{10,48}", "Slack Token format"),
+    (r"(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{24,}", "Stripe API Key format"),
     (r"(?i)api[_-]?key\s*[:=]\s*[\"']([a-zA-Z0-9_\-]{24,})[\"']", "Generic API Key assignment"),
     (r"(?i)password\s*[:=]\s*[\"']([^\"']{8,})[\"']", "Plaintext password assignment"),
 ]
 
 # Placeholders y valores mock conocidos delimitados por palabras
 PLACEHOLDER_RE = re.compile(
-    r"(?i)\b(replace_me|your[-_]?(?:api[-_]?)?key|dummy|placeholder|<insert|test[-_]?secret|xxx|sample[-_]?key)\b|os\.(?:environ|getenv)\b"
+    r"(?i)\b(replace_me|your[-_]?(?:api[-_]?)?key|dummy|placeholder|<insert|test[-_]?(?:secret|key|token)|xxx|sample[-_]?key|example[-_]?(?:key|token|secret)|my[-_]?secret)\b|os\.(?:environ|getenv)\b|process\.env\b"
 )
 
 SECRET_QUESTIONS = {

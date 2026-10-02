@@ -327,6 +327,27 @@ def build_test_cases(project_dir: str) -> list[TestCase]:
             expected_in_stderr="possible secret detected",
         ),
         TestCase(
+            name="secrets_block_anthropic_key",
+            hook_script="detect_secrets.py",
+            payload={"tool_name": "Edit", "tool_input": {"new_string": "ANTHROPIC_KEY = 'sk-ant-api03-abcdef123456789012345678901234567890'"}},
+            expected_exit=2,
+            expected_in_stderr="possible secret detected",
+        ),
+        TestCase(
+            name="secrets_block_google_key",
+            hook_script="detect_secrets.py",
+            payload={"tool_name": "Write", "tool_input": {"content": "GOOGLE_API_KEY = 'AIzaSyA1234567890abcdefghijklmnopqrst'"}},
+            expected_exit=2,
+            expected_in_stderr="possible secret detected",
+        ),
+        TestCase(
+            name="secrets_block_stripe_key",
+            hook_script="detect_secrets.py",
+            payload={"tool_name": "Edit", "tool_input": {"new_string": "STRIPE_SECRET = 'sk_" + "live_51Abcdefghijklmnopqrstuvw'"}},
+            expected_exit=2,
+            expected_in_stderr="possible secret detected",
+        ),
+        TestCase(
             name="secrets_block_aws_key",
             hook_script="detect_secrets.py",
             payload={"tool_name": "Write", "tool_input": {"content": "export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"}},
@@ -350,6 +371,12 @@ def build_test_cases(project_dir: str) -> list[TestCase]:
             name="secrets_allow_env_getter",
             hook_script="detect_secrets.py",
             payload={"tool_name": "Edit", "tool_input": {"new_string": "api_key = os.environ.get('API_KEY')"}},
+            expected_exit=0,
+        ),
+        TestCase(
+            name="secrets_allow_process_env",
+            hook_script="detect_secrets.py",
+            payload={"tool_name": "Edit", "tool_input": {"new_string": "const key = process.env.API_SECRET_KEY"}},
             expected_exit=0,
         ),
         TestCase(
@@ -456,8 +483,10 @@ def main() -> None:
         common._ROUTER_INSTANCE = None  # Reset para asegurar el dispositivo correcto
         _ = common.get_laya_router()
 
-    # Asegurar que ./tmp existe dentro del proyecto
-    os.makedirs(os.path.join(project_dir, "tmp"), exist_ok=True)
+    # Asegurar que ./tmp existe dentro del proyecto y configurar directorio de logs dedicado
+    test_logs_dir = os.path.join(project_dir, "tmp", "test_hook_runs")
+    os.makedirs(test_logs_dir, exist_ok=True)
+    os.environ["SYNAPSE_LOG_DIR"] = test_logs_dir
 
     all_cases = build_test_cases(project_dir)
 
@@ -498,9 +527,12 @@ def main() -> None:
         else:
             passed += 1
 
+    log_file = Path(test_logs_dir) / "security_hooks.log"
+    log_count = len(log_file.read_text(encoding="utf-8").splitlines()) if log_file.exists() else 0
     print("-" * 80)
     print(f"RESULTADOS FINALES ({device_flag.upper()}):")
     print(f"Total: {len(cases)} | Aprobados: {passed} | Fallidos: {failed} | Tiempo total: {total_time:.1f} ms")
+    print(f"Auditoría de logs: {log_count} eventos registrados en {log_file}")
     print("=" * 80)
 
     if failed > 0:
