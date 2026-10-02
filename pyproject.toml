@@ -1,0 +1,15 @@
+[project]
+name = "claude-plugin-synapse"
+version = "1.0.0"
+description = "Real-time security guardrails and PreToolUse interceptors for Claude Code powered by Laya System 1"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.1.0",
+    "laya>=0.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
