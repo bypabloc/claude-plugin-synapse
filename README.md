@@ -67,7 +67,7 @@ Todos los scripts residen en `hooks/` y se rigen por la especificación oficial 
 
 | Script | Evento | Herramientas | Política y Comportamiento |
 | :--- | :--- | :--- | :--- |
-| [`block_dangerous.py`](hooks/block_dangerous.py) | `PreToolUse` | `Bash` | **Auto-Allow:** Operaciones sobre `./tmp/`, `/tmp/claude-*`, `dist/`, `.cache/`.<br>**Block (exit 2):** `rm -rf /`, `git push --force`, fork bombs, `/dev/sd*`, escrituras en `.git/` o fuera del proyecto, y escribir archivos desde Bash (`echo >`, `cat <<EOF >`, `sed -i`, scripts inline que escriben): usar `Write`/`Edit`.<br>**Ask (exit 0):** Eliminación permanente de código fuente o archivos base, y comandos que Laya afinado marca como riesgosos (FPR 0.36% en comandos reales, ver `models/laya-block-dangerous.json`). |
+| [`block_dangerous.py`](hooks/block_dangerous.py) | `PreToolUse` | `Bash` | **Auto-Allow:** Operaciones sobre `./tmp/`, `/tmp/claude-*`, `dist/`, `.cache/`.<br>**Block (exit 2):** `rm -rf /`, `git push --force`, fork bombs, `/dev/sd*`, escrituras fuera del entorno git del proyecto (con variables resueltas: `p=/home/x; rm -rf "$p"`), y escribir archivos desde Bash (`echo >`, `cat <<EOF >`, `sed -i`, scripts inline que escriben): usar `Write`/`Edit`.<br>**Ask (exit 0):** Cualquier comando que involucre la carpeta `.git`, eliminación permanente de código fuente o archivos base, y comandos que Laya afinado marca como riesgosos (FPR 0.36% en comandos reales, ver `models/laya-block-dangerous.json`). |
 | [`block_env_read.py`](hooks/block_env_read.py) | `PreToolUse` | `Read`, `Bash` | **Allow:** Plantillas `.env.example`, `.env.sample`, comandos `source .env`.<br>**Block (exit 2):** Lectura con `Read` o comandos `cat`, `head`, `tail`, `awk`, `strings`, `python`, `node`. Devuelve esquema ofuscado. |
 | [`detect_secrets.py`](hooks/detect_secrets.py) | `PreToolUse` | `Edit`, `Write` | **Allow:** Placeholders (`your-api-key`, `REPLACE_ME`, `process.env`, `os.getenv`).<br>**Block (exit 2):** Llaves privadas RSA/SSH, OpenAI, Anthropic, Google, AWS, Stripe, GitHub, contraseñas en texto plano y tokens detectados por Laya. |
 | [`protect_files.py`](hooks/protect_files.py) | `PreToolUse` | `Edit`, `Write` | **Allow:** Código fuente general, plantillas `.dist`/`.template`.<br>**Block (exit 2):** Modificación manual de `.git/`, `.venv/` o lockfiles de dependencias.<br>**Ask (exit 0):** Ajustes de configuración de agentes (`.claude/settings.json`). |
@@ -130,11 +130,12 @@ python3 scripts/synapse_log.py --follow             # en vivo
 ━━ 2026-10-02 09:00:56.720 ━━ block_dangerous ━━ run 29e84acc ━━ session 49c43f62
    tool    Bash
    cwd     /home/bypabloc/projects/bypabloc/claude-plugin-synapse
-   engine  laya-cuda
-   input   rm -rf .git
+   engine  laya-daemon-gpu
+   input   p=/home/bypabloc; rm -rf "$p/otro"
    ├─ regex.catastrophic       result=no_match  checked=21
-   ├─ structure.git_dir        result=match  subcmd=rm -rf .git  target=.../claude-plugin-synapse/.git
-   └─ DECISION  BLOCK  (24.4 ms)  Prohibido modificar .git/ (contiene todo el historial): 'rm' sobre .git.
+   ├─ structure.outside_project  result=match  subcmd=rm -rf "$p/otro"  target=/home/bypabloc/otro  roots=[...]
+   └─ DECISION  BLOCK  python · structure.outside_project  (7.6 ms)  Prohibido modificar rutas fuera del proyecto (...): 'rm' sobre /home/bypabloc/otro.
+      evidencia  {"subcmd": "rm -rf \"$p/otro\"", "target": "/home/bypabloc/otro", "roots": ["..."]}
 ```
 
 ### Configuración de Variables de Entorno:
@@ -143,7 +144,10 @@ python3 scripts/synapse_log.py --follow             # en vivo
 | :--- | :--- | :--- |
 | `SYNAPSE_LOG_DIR` | Reemplaza el directorio de la traza JSONL (`AAAA-MM-DD.jsonl`). Ideal para testing. | `${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/` |
 | `SYNAPSE_DEBUG` | Activa mensajes informativos de diagnóstico y aceleración de hardware en `stderr` (`1` para activar). | Desactivado (`0`) para evitar ruido en terminal |
-| `LAYA_DEVICE` | Fuerza el acelerador para Laya (`cuda`, `cpu`, `mps`). | Autodetección de hardware (`cuda` si está disponible, sino `cpu`) |
+| `SYNAPSE_LOG_RETENTION_DAYS` | Días que se conservan las trazas diarias; las más antiguas se borran al crear la del día (`0` = conservar todo). | `30` |
+| `SYNAPSE_LAYA_IDLE_SECONDS` | Segundos sin uso tras los que el daemon de Laya termina y libera la VRAM. | `1200` |
+| `SYNAPSE_LAYA_STARTUP_SECONDS` | Espera máxima del hook a que el daemon arranque; si se agota, ese hook sigue solo con reglas deterministas. | `40` |
+| `SYNAPSE_RUNTIME_DIR` | Carpeta del socket y del log del daemon. | `$XDG_RUNTIME_DIR` o `~/.cache` (+ `/synapse`) |
 
 ---
 

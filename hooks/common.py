@@ -2,9 +2,10 @@
 
 Contexto y Propósito:
   Provee la infraestructura compartida para los hooks de seguridad de Claude Code:
-  - Inicialización singleton del Router Laya (precarga y optimización de memoria).
-  - Autodetección de aceleradores (CUDA/GPU vs. CPU) y política de fallback automático.
+  - Cliente del daemon de Laya (hooks/laya_daemon.py): el modelo vive en un proceso persistente y los hooks
+    nunca importan torch (importarlo y cargar el checkpoint costaba ~7 s por hook).
   - Gestión de entrada y salida del protocolo PreToolUse (stdin JSON, stdout JSON 'allow'/'ask', stderr exit 2).
+  - Alcance del proyecto (entorno git de CLAUDE_PROJECT_DIR) y resolución determinista de variables de shell.
   - Normalización de rutas y autorización incondicional de temporales (./tmp/**, /tmp/claude-*).
   - Inferencia y ofuscación de variables de entorno (describe formatos sin exponer secretos).
   - Traza JSONL de cada paso en ${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/AAAA-MM-DD.jsonl
@@ -17,39 +18,29 @@ Ejemplos de Uso:
   >>> infer_format("postgres://user:pass@host:5432/db")
   'URL, 33 caracteres'
   >>> should_use_laya()
-  True  # si CUDA está disponible y no se especificó --fallback
+  True  # si Laya está instalado y no se especificó --fallback
 """
 
 from __future__ import annotations
 
+import fcntl
+import fnmatch
+import functools
+import importlib.util
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-# Desactivar TensorFlow Abseil para evitar bloqueos en imports
-os.environ["USE_TF"] = "0"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import laya_daemon
 
-# Importación resiliente de Laya y PyTorch
-try:
-    import torch
-    import laya
-    from laya import Router
-    _LAYA_AVAILABLE = True
-except ImportError:
-    torch = None
-    laya = None
-    Router = None
-    _LAYA_AVAILABLE = False
-
-# Instancia singleton perezosa del Router
-_ROUTER_INSTANCE: Any = None
+# Solo se comprueba que existan: importarlos aquí costaba 1.7 s en cada hook
+_LAYA_AVAILABLE = all(importlib.util.find_spec(m) is not None for m in ("laya", "torch"))
 
 # Segmentos de archivos y carpetas temporales autorizados automáticamente
 TMP_SEGMENT_RE = re.compile(r"(^|/)tmp(/|$)")
@@ -93,67 +84,36 @@ ASK_PATTERNS = (
 )
 
 
-def is_cuda_available() -> bool:
-    """Verifica si CUDA/GPU está disponible de forma segura."""
-    if not _LAYA_AVAILABLE or torch is None:
-        return False
-    try:
-        return torch.cuda.is_available()
-    except Exception:
-        return False
-
-
 def should_use_laya() -> bool:
-    """Determina si se debe utilizar Laya System 1 o activar el fallback de scripts originales.
+    """Determina si se consulta a Laya System 1 o se opera solo con las reglas deterministas.
 
     Reglas:
-      - Si Laya no está instalado en el entorno: False (fallback determinístico).
-      - Si se especifica flag --fallback: False (usa los scripts originales de inmediato).
-      - Si se especifica flag --cpu: True (fuerza inferencia de Laya en CPU).
-      - Si se especifica flag --gpu: True si CUDA está disponible, False si no hay GPU (fallback).
-      - Sin flags: Autodetecta CUDA. Si hay GPU activa Laya; si no hay GPU, activa el fallback.
+      - Laya o torch no instalados: False (fallback determinista).
+      - Flag --fallback: False.
+      - En otro caso True: el daemon decide el dispositivo. Sin GPU (y sin --cpu) responde con error y el
+        hook sigue solo con las reglas deterministas, igual que el fallback.
     """
+    return _LAYA_AVAILABLE and "--fallback" not in sys.argv
+
+
+def laya_mode() -> str:
+    """'cpu' fuerza la inferencia en CPU (--cpu); 'gpu' exige CUDA. Cada modo tiene su propio daemon."""
+    return "cpu" if "--cpu" in sys.argv else "gpu"
+
+
+class LayaClient:
+    """Misma firma que laya.Router.predict, resuelta por el daemon persistente (hooks/laya_daemon.py)."""
+
+    def predict(self, state: Any, questions: dict[str, Any], model: str | None = None, delta: str | None = None) -> dict[str, Any]:
+        request = {"op": "predict", "state": state, "questions": questions, "model": model, "delta": delta}
+        return laya_daemon.request(request, laya_mode())["result"]
+
+
+def get_laya_router() -> LayaClient:
+    """Cliente del daemon de Laya. Lanza excepción si el daemon no responde: los hooks caen al fallback."""
     if not _LAYA_AVAILABLE:
-        return False
-    if "--fallback" in sys.argv:
-        return False
-    if "--cpu" in sys.argv:
-        return True
-    if "--gpu" in sys.argv:
-        return is_cuda_available()
-    return is_cuda_available()
-
-
-def get_configured_device() -> str:
-    """Determina el acelerador a utilizar según argv, variables de entorno o hardware detectado."""
-    if not _LAYA_AVAILABLE or torch is None:
-        return "cpu"
-
-    if "--cpu" in sys.argv:
-        physical_cores = os.cpu_count() or 4
-        target_threads = max(1, physical_cores // 2 if physical_cores > 4 else physical_cores)
-        torch.set_num_threads(target_threads)
-        return "cpu"
-
-    if "--gpu" in sys.argv:
-        return "cuda" if is_cuda_available() else "cpu"
-
-    env_device = os.environ.get("LAYA_DEVICE", "").lower()
-    if env_device in {"cuda", "cpu", "mps"}:
-        return env_device
-
-    return "cuda" if is_cuda_available() else "cpu"
-
-
-def get_laya_router() -> Any:
-    """Retorna una instancia singleton precargada de Laya Router."""
-    global _ROUTER_INSTANCE
-    if not _LAYA_AVAILABLE or Router is None:
         raise RuntimeError("Laya System 1 no está disponible en este entorno. Opere en modo fallback.")
-    if _ROUTER_INSTANCE is None:
-        device = get_configured_device()
-        _ROUTER_INSTANCE = Router(preload=True, device=device)
-    return _ROUTER_INSTANCE
+    return LayaClient()
 
 
 def get_log_dir() -> Path:
@@ -226,10 +186,7 @@ def start_trace(hook_name: str, data: dict[str, Any]) -> None:
 
 
 def engine_mode() -> str:
-    try:
-        return f"laya-{get_configured_device()}" if should_use_laya() else "fallback"
-    except Exception:
-        return "fallback"
+    return f"laya-daemon-{laya_mode()}" if should_use_laya() else "fallback"
 
 
 def log_step(step: str, **fields: Any) -> None:
@@ -247,12 +204,57 @@ def log_step(step: str, **fields: Any) -> None:
         }
         if step == "decision" and "t0" in _TRACE:
             record["ms"] = round((now - _TRACE["t0"]).total_seconds() * 1000, 1)
+        if step == "laya" and fields.get("result") not in {"skipped", "error"}:
+            _TRACE["laya_consulted"] = True
         path = get_log_file(now)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        if not path.exists():
+            prune_old_logs(path.parent, now)  # una vez por día: al crear el archivo del día
+        line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
+        # Un solo write() bajo flock: un hook matado a mitad de línea dejaba '{"ts"' pegado al registro siguiente
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            os.write(fd, line)
+        finally:
+            os.close(fd)
     except Exception:
         pass
+
+
+LOG_NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.jsonl$")
+
+
+def prune_old_logs(log_dir: Path, now: datetime) -> None:
+    """Borra las trazas diarias más antiguas que SYNAPSE_LOG_RETENTION_DAYS (30 por defecto; 0 = conservar todo)."""
+    try:
+        days = int(os.environ.get("SYNAPSE_LOG_RETENTION_DAYS", "30"))
+    except ValueError:
+        return
+    if days <= 0:
+        return
+    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    for path in log_dir.iterdir():
+        match = LOG_NAME_RE.match(path.name)
+        if match and match.group(1) < cutoff:
+            path.unlink(missing_ok=True)
+
+
+_RECORD_START = '{"ts"'
+
+
+def parse_log_line(line: str) -> dict[str, Any] | None:
+    """Registro de una línea de la traza; recupera el último registro completo si la línea quedó dañada."""
+    line = line.replace("\x00", "").strip()
+    start = line.rfind(_RECORD_START)
+    for candidate in (line, line[start:] if start > 0 else ""):
+        try:
+            record = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            return record
+    return None
 
 
 _STATUS_NOTIFIED = False
@@ -274,17 +276,18 @@ def notify_device_status() -> None:
             "⚠️ [WARNING] Motor Laya System 1 (GPU/CPU) desactivado o no disponible.\n"
             "   El script opera en modo FALLBACK determinístico (solo reglas estáticas).\n"
         )
-    else:
-        device = get_configured_device()
-        if device == "cpu":
-            sys.stderr.write(
-                "ℹ️ [INFO] Ejecutando Synapse (Laya System 1) en CPU.\n"
-                "   Sugerencia: Para acelerar la inferencia a ~25ms, configure aceleración CUDA/GPU.\n"
-            )
+    elif laya_mode() == "cpu":
+        sys.stderr.write(
+            "ℹ️ [INFO] Ejecutando Synapse (Laya System 1) en CPU.\n"
+            "   Sugerencia: Para acelerar la inferencia a ~25ms, configure aceleración CUDA/GPU.\n"
+        )
 
 
 # "ALLOW" en llamadas directas de los hooks significa "sin opinión" (exit 0 sin JSON): Claude Code decide
 _DECISION_NAMES = {"ALLOW": "pass", "PASSED": "pass", "ASK": "ask", "BLOCKED": "block", "allow": "allow", "ask": "ask"}
+
+
+DECIDERS = ("python", "laya")
 
 
 def record_audit_log(
@@ -293,11 +296,30 @@ def record_audit_log(
     tool_name: str = "",
     target: str = "",
     reason: str = "",
+    *,
+    decided_by: str | None = None,
+    rule: str = "sin_objeciones",
+    evidence: dict[str, Any] | None = None,
 ) -> None:
-    """Registra el paso final 'decision' de la ejecución actual."""
+    """Registra el paso final 'decision': qué se decidió, quién (python | laya), con qué regla y por qué.
+
+    Sin decided_by explícito: 'laya' si Laya fue consultado en esta ejecución (y no objetó), si no 'python'.
+    """
     if not _TRACE:
         _TRACE.update(run=os.urandom(4).hex(), session="-", hook=hook_name, tool=tool_name, t0=datetime.now())
-    log_step("decision", decision=_DECISION_NAMES.get(action, action.lower()), target=target, reason=reason)
+    decided_by = decided_by or ("laya" if _TRACE.get("laya_consulted") else "python")
+    _TRACE["decided"] = True
+    fields: dict[str, Any] = {"decision": _DECISION_NAMES.get(action, action.lower()), "decided_by": decided_by, "rule": rule, "target": target, "reason": reason}
+    if evidence:
+        fields["evidence"] = evidence
+    log_step("decision", **fields)
+
+
+def attribution(hook_name: str, decided_by: str, rule: str) -> str:
+    """Encabezado visible en pantalla: qué hook decidió, con qué motor (python | laya) y con qué regla."""
+    if decided_by not in DECIDERS:
+        raise ValueError(f"decided_by debe ser uno de {DECIDERS}: {decided_by!r}")
+    return f"Synapse · {hook_name} ({decided_by}) · regla {rule}"
 
 
 def read_hook_input(hook_name: str = "hook") -> dict[str, Any]:
@@ -315,17 +337,22 @@ def read_hook_input(hook_name: str = "hook") -> dict[str, Any]:
 def emit_decision(
     decision: str,
     reason: str,
-    hook_name: str = "hook",
-    tool_name: str = "",
-    target: str = "",
+    *,
+    hook_name: str,
+    tool_name: str,
+    target: str,
+    decided_by: str,
+    rule: str,
+    evidence: dict[str, Any] | None = None,
 ) -> None:
-    """Emite una decisión formal ('allow' o 'ask') al stdout en formato PreToolUse y la audita en log."""
-    record_audit_log(decision.lower(), hook_name, tool_name, target, reason)
+    """Emite 'allow' o 'ask' en formato PreToolUse. El motivo visible empieza con quién decidió y la regla."""
+    shown = f"{attribution(hook_name, decided_by, rule)}: {reason}"
+    record_audit_log(decision.lower(), hook_name, tool_name, target, reason, decided_by=decided_by, rule=rule, evidence=evidence)
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": decision,
-            "permissionDecisionReason": reason,
+            "permissionDecisionReason": shown,
         }
     }
     sys.stdout.write(json.dumps(payload))
@@ -334,15 +361,41 @@ def emit_decision(
 
 def emit_block(
     reason: str,
+    *,
+    hook_name: str,
+    tool_name: str,
+    target: str,
+    decided_by: str,
+    rule: str,
+    evidence: dict[str, Any] | None = None,
     exit_code: int = 2,
-    hook_name: str = "hook",
-    tool_name: str = "",
-    target: str = "",
 ) -> None:
-    """Bloquea la ejecución de la herramienta con un mensaje en stderr y la audita en log."""
-    record_audit_log("BLOCKED", hook_name, tool_name, target, reason)
-    sys.stderr.write(f"🚫 BLOCKED: {reason}\n")
+    """Bloquea la herramienta (exit 2). stderr, que Claude Code muestra en pantalla, dice quién bloqueó y por qué."""
+    header = attribution(hook_name, decided_by, rule)
+    record_audit_log("BLOCKED", hook_name, tool_name, target, reason, decided_by=decided_by, rule=rule, evidence=evidence)
+    sys.stderr.write(f"🚫 BLOCKED · {header}\n{reason}\n")
     sys.exit(exit_code)
+
+
+def run_main(main: Any) -> None:
+    """Ejecuta el main de un hook y garantiza que la ejecución cierre con un paso 'decision' en la traza.
+
+    Las salidas tempranas (entrada vacía, otra herramienta) quedan como pass con regla 'exit.early'. Un error
+    inesperado se registra (step 'error') y se relanza: Claude Code lo muestra como error no bloqueante.
+    """
+    try:
+        main()
+    except SystemExit:
+        if _TRACE and not _TRACE.get("decided"):
+            record_audit_log("ALLOW", _TRACE.get("hook", "hook"), _TRACE.get("tool", ""), rule="exit.early", reason="Sin nada que evaluar")
+        raise
+    except Exception as exc:
+        log_step("error", error=f"{type(exc).__name__}: {exc}")
+        if not _TRACE.get("decided"):
+            record_audit_log("ALLOW", _TRACE.get("hook", "hook"), _TRACE.get("tool", ""), rule="hook.error", reason="Error interno del hook: Claude Code aplica sus permisos normales")
+        raise
+    if _TRACE and not _TRACE.get("decided"):
+        record_audit_log("ALLOW", _TRACE.get("hook", "hook"), _TRACE.get("tool", ""), rule="exit.early", reason="Sin nada que evaluar")
 
 
 def resolve_path(path: str, cwd: str) -> str:
@@ -564,8 +617,10 @@ def parse_command_targets(subcmd: str) -> tuple[str, list[str]]:
         return "", []
     if not tokens:
         return "", []
-    # Asignaciones de entorno (VAR=x cmd) y envoltorios (sudo rm ...) no son el comando real
-    while tokens and (re.match(r"^[A-Za-z_]\w*=", tokens[0]) or tokens[0] in COMMAND_WRAPPERS):
+    tokens[0] = tokens[0].lstrip("(") or tokens[0]  # subshell: `(cd x && rm y)`
+    # Palabras clave (`do rm x`, `then rm x`), asignaciones de entorno (VAR=x cmd) y envoltorios (sudo rm ...)
+    # no son el comando real: sin esto, `for f in *; do rm -rf "$f"; done` no se analizaba
+    while tokens and (re.match(r"^[A-Za-z_]\w*=", tokens[0]) or tokens[0] in COMMAND_WRAPPERS or tokens[0] in SHELL_KEYWORDS):
         tokens = tokens[1:]
         while tokens and tokens[0].startswith("-"):  # flags del envoltorio (sudo -E, nice -n 5)
             tokens = tokens[1:]
@@ -590,6 +645,7 @@ def parse_command_targets(subcmd: str) -> tuple[str, list[str]]:
 
 
 COMMAND_WRAPPERS = {"sudo", "doas", "nohup", "time", "command", "exec", "nice", "ionice", "env"}
+SHELL_KEYWORDS = {"do", "then", "else", "elif", "if", "while", "until", "!", "{"}
 REDIRECT_OP_RE = re.compile(r"(\d|&)?>{1,2}\|?")
 REDIRECT_GLUED_RE = re.compile(r"^(\d|&)?>{1,2}\|?(.+)$")
 HARMLESS_DEVICES = ("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin", "/dev/tty", "/dev/fd/")
@@ -612,32 +668,130 @@ def redirect_targets(subcmd: str) -> list[str]:
     return [t for t in targets if not t.startswith("&")]
 
 
-def project_root(cwd: str) -> str:
-    """Raíz del entorno de ejecución: toplevel git del cwd, o el propio cwd si no es un repo."""
+def _git_lines(cwd: str, *args: str) -> list[str]:
     try:
-        proc = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=2
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return os.path.realpath(proc.stdout.strip())
+        proc = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=2)
     except Exception:
-        pass
-    return os.path.realpath(cwd)
+        return []
+    return proc.stdout.splitlines() if proc.returncode == 0 else []
 
 
-def is_outside_project(path: str, cwd: str, root: str) -> bool:
-    """True si la ruta resuelta cae fuera de root. Excepciones: scratchpad de sesión y dispositivos inocuos.
+def allowed_roots(cwd: str) -> tuple[str, ...]:
+    """Raíces donde Bash puede escribir: el entorno git del proyecto de la sesión.
 
-    Una ruta con variables sin resolver ($DIR/x) no es decidible aquí: se trata como interna y queda a cargo
-    de las demás reglas (los borrados no desechables piden confirmación).
+    El ancla es CLAUDE_PROJECT_DIR (donde se abrió Claude Code), no el cwd: el agente puede hacer `cd` a
+    cualquier parte y eso no debe ampliar el alcance. Sin la variable (tests, CLI) se usa el cwd.
+    Del ancla se toman su toplevel git, el superproyecto (si es un submódulo) y todos los worktrees del repo,
+    así una sesión en client/ puede trabajar en la raíz y una sesión en un worktree puede escribir en el
+    repo principal. Un repo de dotfiles en ~ (o en /) nunca amplía el alcance: se vuelve al ancla.
+    """
+    return _roots_for(os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR") or cwd))
+
+
+@functools.lru_cache(maxsize=8)
+def _roots_for(anchor: str) -> tuple[str, ...]:
+    candidates = _git_lines(anchor, "rev-parse", "--show-toplevel", "--show-superproject-working-tree")
+    candidates += [line[len("worktree "):] for line in _git_lines(anchor, "worktree", "list", "--porcelain") if line.startswith("worktree ")]
+    too_wide = {os.path.realpath(str(Path.home())), os.sep}
+    roots = [r for r in dict.fromkeys(os.path.realpath(c) for c in candidates if c) if r not in too_wide]
+    return tuple(roots) or (anchor,)
+
+
+allowed_roots.cache_clear = _roots_for.cache_clear  # type: ignore[attr-defined]
+
+
+def _within(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def is_outside_project(path: str, cwd: str, roots: str | tuple[str, ...] | list[str], follow_last: bool = True) -> bool:
+    """True si la ruta resuelta cae fuera de todas las raíces. Excepciones: scratchpad de sesión y dispositivos.
+
+    follow_last=False no sigue un symlink en el último componente: `rm link` borra el enlace, no su destino.
+    Una ruta con variables sin resolver ($DIR/x) no es decidible aquí: se trata como interna.
     """
     resolved = resolve_path(path, cwd)
     if "$" in resolved:
         return False
     if SCRATCHPAD_RE.match(resolved) or resolved.startswith(HARMLESS_DEVICES):
         return False
-    real = os.path.realpath(resolved)
-    return not (real == root or real.startswith(root.rstrip(os.sep) + os.sep))
+    if follow_last:
+        real = os.path.realpath(resolved)
+    else:
+        real = os.path.join(os.path.realpath(os.path.dirname(resolved)), os.path.basename(resolved))
+    return not any(_within(real, root) for root in ([roots] if isinstance(roots, str) else roots))
+
+
+# $NAME, ${NAME}, ${NAME:-defecto} / ${NAME-defecto}. Cualquier otra forma ($1, $?, ${x#y}) no se resuelve.
+VAR_REF_RE = re.compile(r"\$\{([A-Za-z_]\w*)(?::?-([^}]*))?\}|\$([A-Za-z_]\w*)")
+MAX_EXPANSIONS = 64
+ShellVars = dict[str, "list[str] | None"]
+
+
+def _lookup_var(name: str, variables: ShellVars, cwd: str | None) -> list[str] | None:
+    if name in variables:
+        return variables[name]  # None = asignada desde algo no resoluble ($(cmd), read)
+    if name == "PWD":
+        return [cwd] if cwd else None
+    if name in os.environ:
+        return [os.environ[name]]
+    return None
+
+
+def expand_word(word: str, variables: ShellVars, cwd: str | None) -> list[str] | None:
+    """Valores posibles de una palabra de shell tras expandir variables; None si no es determinable.
+
+    Las variables del propio comando (asignaciones, `for x in ...`) tienen prioridad sobre el entorno,
+    como en bash. Sustituciones de comando ($(...), `...`) y parámetros especiales nunca se resuelven.
+    """
+    if "`" in word or "$(" in word:
+        return None
+    results = [""]
+    pos = 0
+    for m in VAR_REF_RE.finditer(word):
+        literal = word[pos:m.start()]
+        if "$" in literal:
+            return None
+        values = _lookup_var(m.group(1) or m.group(3), variables, cwd)
+        if values is None and m.group(2) is not None:
+            if "$" in m.group(2):
+                return None
+            values = [m.group(2)]
+        if values is None:
+            return None
+        results = [r + literal + v for r in results for v in values]
+        if len(results) > MAX_EXPANSIONS:
+            return None
+        pos = m.end()
+    tail = word[pos:]
+    if "$" in tail:
+        return None
+    return [r + tail for r in results]
+
+
+GLOB_CHARS = set("*?[")
+
+
+def _worst_case_glob(path: str) -> str:
+    """Un segmento como '.*' puede expandirse a '..' en algunos shells: se evalúa como el directorio padre."""
+    return "/".join(
+        ".." if GLOB_CHARS & set(seg) and seg.startswith(".") and fnmatch.fnmatchcase("..", seg) else seg
+        for seg in path.split("/")
+    )
+
+
+def resolve_candidates(word: str, variables: ShellVars, cwd: str | None) -> list[str] | None:
+    """Rutas absolutas a las que puede apuntar una palabra; None si alguna no es determinable."""
+    values = expand_word(word, variables, cwd)
+    if values is None:
+        return None
+    resolved = []
+    for value in values:
+        value = _worst_case_glob(os.path.expanduser(value))
+        if not os.path.isabs(value) and cwd is None:
+            return None
+        resolved.append(os.path.normpath(value if os.path.isabs(value) else os.path.join(cwd, value)))
+    return resolved
 
 
 def is_env_file(path: str) -> bool:
@@ -695,7 +849,7 @@ def build_env_block_message(file_path: str) -> str:
     """Construye un mensaje explicativo detallando cómo usar las variables sin leerlas."""
     keys = extract_keys_with_format(file_path)
     lines = [
-        f"🚫 BLOCKED: Lectura directa de archivo de credenciales: {file_path}",
+        f"Lectura directa de archivo de credenciales: {file_path}",
         "No se permite leer el contenido de archivos .env con Read/cat/head/tail.",
         "Si necesitas USAR las variables (no verlas), usa en Bash:",
         f"  set -a; source {file_path}; set +a",

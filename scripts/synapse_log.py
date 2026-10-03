@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hooks"))
-from common import get_log_file  # noqa: E402
+from common import get_log_file, parse_log_line  # noqa: E402
 
 COLORS = {"block": "\033[91m", "ask": "\033[93m", "allow": "\033[92m", "pass": "\033[90m"}
 RESET = "\033[0m"
@@ -54,11 +54,10 @@ def read_records(paths: list[Path]) -> list[dict]:
     records = []
     for path in paths:
         if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                record = parse_log_line(line)
+                if record:
+                    records.append(record)
     return records
 
 
@@ -116,7 +115,10 @@ def render(run: list[dict], color: bool) -> str:
         tag = decision.upper()
         if color:
             tag = f"{COLORS.get(decision, '')}{tag}{RESET}"
-        lines.append(f"   └─ DECISION  {tag}  ({final.get('ms', '?')} ms)  {_oneline(final.get('reason', ''))}")
+        who = f"{final.get('decided_by', '?')} · {final.get('rule', '?')}"
+        lines.append(f"   └─ DECISION  {tag}  {who}  ({final.get('ms', '?')} ms)  {_oneline(final.get('reason', ''))}")
+        if final.get("evidence"):
+            lines.append(f"      evidencia  {json.dumps(final['evidence'], ensure_ascii=False)}")
     return "\n".join(lines)
 
 
@@ -142,9 +144,8 @@ def follow(args: argparse.Namespace, color: bool) -> None:
                 chunk = f.read()
                 offset = f.tell()
             for line in chunk.splitlines():
-                try:
-                    r = json.loads(line)
-                except json.JSONDecodeError:
+                r = parse_log_line(line)
+                if not r:
                     continue
                 pending.setdefault(r.get("run", "-"), []).append(r)
                 if r.get("step") == "decision":

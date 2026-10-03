@@ -227,7 +227,7 @@
     "expected_in_stderr": "catastrófico"
   },
   {
-    "name": "block_git_dir_rm",
+    "name": "ask_git_dir_rm",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -235,11 +235,11 @@
       },
       "cwd": "{project}"
     },
-    "expected_exit": 2,
-    "expected_in_stderr": "historial"
+    "expected_exit": 0,
+    "expected_decision": "ask"
   },
   {
-    "name": "block_git_dir_rm_objects",
+    "name": "ask_git_dir_rm_objects",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -247,11 +247,11 @@
       },
       "cwd": "{project}"
     },
-    "expected_exit": 2,
-    "expected_in_stderr": "historial"
+    "expected_exit": 0,
+    "expected_decision": "ask"
   },
   {
-    "name": "block_git_dir_mv",
+    "name": "block_git_dir_mv_outside_project",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -260,7 +260,7 @@
       "cwd": "{project}"
     },
     "expected_exit": 2,
-    "expected_in_stderr": "historial"
+    "expected_in_stderr": "fuera del proyecto"
   },
   {
     "name": "block_git_dir_redirect",
@@ -272,7 +272,7 @@
       "cwd": "{project}"
     },
     "expected_exit": 2,
-    "expected_in_stderr": "historial"
+    "expected_in_stderr": "tool Write"
   },
   {
     "name": "block_git_dir_sed_inplace",
@@ -284,10 +284,10 @@
       "cwd": "{project}"
     },
     "expected_exit": 2,
-    "expected_in_stderr": "historial"
+    "expected_in_stderr": "tool Edit"
   },
   {
-    "name": "block_git_dir_cp_into",
+    "name": "ask_git_dir_cp_into",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -295,11 +295,11 @@
       },
       "cwd": "{project}"
     },
-    "expected_exit": 2,
-    "expected_in_stderr": "historial"
+    "expected_exit": 0,
+    "expected_decision": "ask"
   },
   {
-    "name": "block_git_dir_find_delete",
+    "name": "ask_git_dir_find_delete",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -307,11 +307,11 @@
       },
       "cwd": "{project}"
     },
-    "expected_exit": 2,
-    "expected_in_stderr": "historial"
+    "expected_exit": 0,
+    "expected_decision": "ask"
   },
   {
-    "name": "block_git_dir_after_tmp_cleanup",
+    "name": "ask_git_dir_after_tmp_cleanup",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -319,11 +319,11 @@
       },
       "cwd": "{project}"
     },
-    "expected_exit": 2,
-    "expected_in_stderr": "historial"
+    "expected_exit": 0,
+    "expected_decision": "ask"
   },
   {
-    "name": "pass_git_dir_read_cat",
+    "name": "ask_git_dir_read_cat",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -331,10 +331,11 @@
       },
       "cwd": "{project}"
     },
-    "expected_exit": 0
+    "expected_exit": 0,
+    "expected_decision": "ask"
   },
   {
-    "name": "pass_git_dir_read_sed",
+    "name": "ask_git_dir_read_sed",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -342,10 +343,11 @@
       },
       "cwd": "{project}"
     },
-    "expected_exit": 0
+    "expected_exit": 0,
+    "expected_decision": "ask"
   },
   {
-    "name": "pass_git_dir_cp_out",
+    "name": "ask_git_dir_cp_out",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -353,7 +355,8 @@
       },
       "cwd": "{project}"
     },
-    "expected_exit": 0
+    "expected_exit": 0,
+    "expected_decision": "ask"
   },
   {
     "name": "pass_gitignore_and_github",
@@ -953,6 +956,75 @@
   {
     "name": "pass_git_commit_heredoc_message",
     "payload": {"tool_name": "Bash", "tool_input": {"command": "git commit -q -F - <<'EOF'\nfix: x\nEOF"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "block_kill_all_processes",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "kill -9 -1"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "regla regex.catastrophic"
+  },
+  {
+    "name": "block_kill_all_processes_signal_name",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "kill -s KILL -1"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "regla regex.catastrophic"
+  },
+  {
+    "name": "block_kill_all_processes_sigkill",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "sleep 1; kill -SIGKILL -1"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "regla regex.catastrophic"
+  },
+  {
+    "name": "pass_kill_single_pid",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "kill -9 12345"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "ask_docker_privileged",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "docker run --privileged -v /:/host alpine chroot /host"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_docker_mount_host_root",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "docker run --rm -v /:/mnt alpine ls /mnt"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_docker_pid_host",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "docker compose run --pid=host app sh"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_docker_socket_mount",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "docker run -v /var/run/docker.sock:/var/run/docker.sock docker:cli ps"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "pass_docker_project_volume",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "docker run --rm -v ./src:/app/src node:20 npm test"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "ask_http_server_serving_home",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 -m http.server 8080 --directory ~"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_http_server_serving_root",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "python -m http.server -d / 9000"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "pass_http_server_serving_project_dir",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 -m http.server 8080 --directory dist"}, "cwd": "{project}"},
     "expected_exit": 0
   }
 ]

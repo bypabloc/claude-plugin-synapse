@@ -17,9 +17,12 @@ FLAGGING_ANSWERS = {
     "block_dangerous": {"danger": {"choice": "A", "probabilities": {"A": 0.9999, "B": 0.0001}}},
 }
 
+# Entradas que la capa determinista no resuelve: un literal candidato y un nombre sensible ambiguo
+FAKE_TOKEN_LINE = "auth_token = '" + "f3K9xQ2mL7pR" + "4tW8zB1nV6cY'"
+
 PAYLOADS = {
-    "detect_secrets": {"tool_name": "Edit", "tool_input": {"file_path": "a.py", "new_string": "auth = build_auth(user_token_value)"}},
-    "protect_files": {"tool_name": "Write", "tool_input": {"file_path": "src/config.py", "content": "x"}},
+    "detect_secrets": {"tool_name": "Edit", "tool_input": {"file_path": "a.py", "new_string": FAKE_TOKEN_LINE}},
+    "protect_files": {"tool_name": "Write", "tool_input": {"file_path": "src/config/secret_settings.py", "content": "x"}},
     "block_env_read": {"tool_name": "Bash", "tool_input": {"command": "python3 tools/show.py .env.local"}},
     "block_dangerous": {"tool_name": "Bash", "tool_input": {"command": "python3 scripts/migrate.py"}},
 }

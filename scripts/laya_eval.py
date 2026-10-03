@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "hooks"))
 
 import block_dangerous as bd  # noqa: E402
+from laya_daemon import local_router  # noqa: E402
 
 EVAL_DIR = ROOT / "tmp" / "eval"
 DATASET = EVAL_DIR / "dataset.jsonl"
@@ -140,7 +141,7 @@ MAX_STATE_CHARS = bd.LAYA_MAX_STATE_CHARS
 
 def score(names: list[str], batch_size: int = 16) -> None:
     rows = load_dataset()
-    router = bd.get_laya_router()
+    router = local_router()  # en proceso: predict_batch y load() necesitan el Router real, no el daemon
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     for name in names:
         if (CACHE_DIR / f"{name}.jsonl").exists():

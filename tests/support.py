@@ -59,6 +59,7 @@ def run_in_process(hook: str, payload: dict) -> HookResult:
     if str(HOOKS_DIR) not in sys.path:
         sys.path.insert(0, str(HOOKS_DIR))
     mod = importlib.import_module(hook)
+    common = importlib.import_module("common")
     out, err = io.StringIO(), io.StringIO()
     old_stdin = sys.stdin
     code = 0
@@ -66,7 +67,7 @@ def run_in_process(hook: str, payload: dict) -> HookResult:
         sys.stdin = io.StringIO(json.dumps(payload))
         with redirect_stdout(out), redirect_stderr(err):
             try:
-                mod.main()
+                common.run_main(mod.main)  # igual que `if __name__ == "__main__"` en cada hook
             except SystemExit as exc:
                 code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
     finally:

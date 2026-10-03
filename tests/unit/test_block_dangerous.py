@@ -50,7 +50,7 @@ def test_laya_never_blocks(laya, tmp_path, p_danger, expected_decision) -> None:
 def test_laya_uses_english_checkpoint_and_danger_question(laya, tmp_path) -> None:
     # El delta solo existe sobre el checkpoint inglés: el router no debe elegir el multilingüe por el idioma
     laya.predict.return_value = _answers(0.01)
-    _run("rg -n 'corrección de la opción única' src", tmp_path)
+    _run("python3 tools/buscar.py 'corrección de la opción única'", tmp_path)
     args, kwargs = laya.predict.call_args
     assert kwargs["model"] == "english" and args[1] == block_dangerous.DANGER_QUESTION
 

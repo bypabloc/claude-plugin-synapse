@@ -40,6 +40,7 @@ Ejemplos de Uso en CLI:
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -57,6 +58,7 @@ from common import (
     read_hook_input,
     record_audit_log,
     resolve_path,
+    run_main,
     should_use_laya,
 )
 
@@ -74,6 +76,23 @@ FILE_SENSITIVITY_QUESTIONS = {
 }
 
 
+# Archivos que por nombre o extensión guardan credenciales: confirmación determinista, sin Laya
+CREDENTIAL_FILE_RE = re.compile(
+    r"(?i)(^|/)("
+    r"[^/]+\.(pem|key|p12|pfx|jks|keystore|kdbx|ppk|gpg|tfstate)"
+    r"|[^/]+\.tfstate\.backup"
+    r"|id_(rsa|dsa|ecdsa|ed25519)"
+    r"|\.(npmrc|pypirc|netrc|htpasswd|pgpass|dockercfg|git-credentials)"
+    r"|credentials(\.(json|ya?ml|toml|ini))?"
+    r"|secrets?\.(json|ya?ml|toml|ini|env)"
+    r"|service[-_]?account[^/]*\.json"
+    r"|kubeconfig"
+    r")$"
+)
+# Nombres que sugieren datos sensibles pero no son concluyentes (secret_settings.py): los evalúa Laya
+SENSITIVE_NAME_RE = re.compile(r"(?i)(secret|credential|passw|private|token|api[-_]?key|vault|cert)")
+
+
 def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write") -> None:
     """Evalúa la ruta objetivo combinando verificaciones determinísticas y Laya System 1."""
     if not file_path:
@@ -89,32 +108,35 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
     # 2. Las plantillas (.env.example) se permiten SIEMPRE que no estén dentro de un directorio protegido
     is_editable_template = not in_protected_dir and file_name.endswith(TEMPLATE_SUFFIXES)
     if is_editable_template:
-        record_audit_log("ALLOW", "protect_files", tool_name, file_path, "Plantilla de configuración editable autorizada")
+        record_audit_log("ALLOW", "protect_files", tool_name, file_path, "Plantilla de configuración editable autorizada", rule="path.template")
         sys.exit(0)
 
     log_step("paths", resolved=norm_path, in_protected_dir=in_protected_dir, template=is_editable_template)
+    decision = {"hook_name": "protect_files", "tool_name": tool_name, "target": file_path}
     # 3. Bloqueo determinístico para patrones protegidos críticos
-    if in_protected_dir or any(pat in norm_path or pat == file_name for pat in PROTECTED_PATTERNS):
+    protected = next((pat for pat in PROTECTED_PATTERNS if pat in norm_path or pat == file_name), None)
+    if in_protected_dir or protected:
         emit_block(
-            f"Cannot modify protected file or directory: {file_path}",
-            exit_code=2,
-            hook_name="protect_files",
-            tool_name=tool_name,
-            target=file_path,
+            f"No se puede modificar un archivo o directorio protegido (lockfile, .env, .git/, .venv/, node_modules/): {file_path}",
+            decided_by="python", rule="path.protected", evidence={"pattern": protected, "in_protected_dir": in_protected_dir}, **decision,
         )
 
     # 4. Solicitud de confirmación determinística para configuraciones de Claude
-    if any(pat in norm_path for pat in ASK_PATTERNS):
-        emit_decision(
-            "ask",
-            f"Sensitive configuration requires explicit approval: {file_path}",
-            hook_name="protect_files",
-            tool_name=tool_name,
-            target=file_path,
-        )
+    config = next((pat for pat in ASK_PATTERNS if pat in norm_path), None)
+    if config:
+        emit_decision("ask", f"Configuración de agentes o del IDE: requiere aprobación explícita ({file_path})",
+                      decided_by="python", rule="path.agent_config", evidence={"pattern": config}, **decision)
 
-    # 5. Evaluación semántica con Laya System 1 (si GPU/CUDA está disponible o se solicitó Laya)
-    if should_use_laya():
+    # 5. Archivos de credenciales por nombre o extensión (claves, keystores, tfstate, .npmrc...)
+    if CREDENTIAL_FILE_RE.search(norm_path):
+        log_step("credential_file", result="match")
+        emit_decision("ask", f"El archivo parece guardar credenciales (clave, keystore o configuración con tokens): {file_path}",
+                      decided_by="python", rule="path.credential_file", **decision)
+
+    # 6. Laya solo para nombres ambiguos: en la traza real, 1030 rutas comunes no produjeron ningún 'ask'
+    if not SENSITIVE_NAME_RE.search(file_name):
+        log_step("laya", result="skipped", reason="nombre sin indicios sensibles (determinista)")
+    elif should_use_laya():
         try:
             router = get_laya_router()
             res = router.predict(file_path, FILE_SENSITIVITY_QUESTIONS)
@@ -122,22 +144,18 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
 
             sensitivity = answers["file_sensitivity"]["choice"]
             confidence = answers["file_sensitivity"]["answer_confidence"]
-            log_step("laya", sensitivity=sensitivity, confidence=round(confidence, 3))
+            log_step("laya", result="ok", sensitivity=sensitivity, confidence=round(confidence, 3))
 
             # Laya solo escala a confirmación: los bloqueos son los patrones deterministas de arriba
             if sensitivity in {"critical_blocked", "ask_confirmation"} and confidence >= 0.70:
-                emit_decision(
-                    "ask",
-                    f"Target file classified as sensitive config by Laya System 1: {file_path}",
-                    hook_name="protect_files",
-                    tool_name=tool_name,
-                    target=file_path,
-                )
-        except Exception:
-            # Fallback transparente a reglas determinísticas de protección
-            pass
+                emit_decision("ask", f"el modelo clasifica la ruta como sensible ({sensitivity}, confianza {confidence:.2f} ≥ 0.70): {file_path}",
+                              decided_by="laya", rule="laya.file_sensitivity",
+                              evidence={"sensitivity": sensitivity, "confidence": round(confidence, 3)}, **decision)
+        except Exception as exc:
+            # Fallback a las reglas deterministas, pero el fallo queda en la traza
+            log_step("laya", result="error", error=repr(exc))
 
-    record_audit_log("ALLOW", "protect_files", tool_name, file_path, "Modificación de archivo estándar autorizada")
+    record_audit_log("ALLOW", "protect_files", tool_name, file_path, "Modificación de archivo estándar autorizada", rule="sin_objeciones")
     sys.exit(0)
 
 
@@ -157,4 +175,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_main(main)

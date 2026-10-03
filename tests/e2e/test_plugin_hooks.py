@@ -56,6 +56,7 @@ def claude(repo: Path, laya_flag: str, tmp_path: Path, monkeypatch):
         CLAUDE_PLUGIN_ROOT=str(PROJECT_DIR),
         CLAUDE_PLUGIN_DATA=str(tmp_path / "plugin_data"),
         CLAUDE_CONFIG_DIR=str(claude_dir),
+        CLAUDE_PROJECT_DIR=str(repo),
     )
     env.pop("SYNAPSE_LOG_DIR", None)
 
@@ -85,7 +86,9 @@ SCENARIOS = [
     pytest.param("Bash", {"command": "git push origin --force main"}, "deny", id="bash_force_push_main"),
     pytest.param("Bash", {"command": "cat .env"}, "deny", id="bash_cat_env"),
     pytest.param("Bash", {"command": "pytest -q"}, "passthrough", id="bash_comando_seguro"),
-    pytest.param("Bash", {"command": "rm -rf .git"}, "deny", id="bash_rm_git_dir"),
+    pytest.param("Bash", {"command": "rm -rf .git"}, "ask", id="bash_rm_git_dir"),
+    pytest.param("Bash", {"command": "p=$HOME/otro; rm -rf \"$p\""}, "deny", id="bash_variable_fuera_del_proyecto"),
+    pytest.param("Bash", {"command": "cd tmp && for p in *; do rm -rf -- \"$p\"; done"}, "allow", id="bash_bucle_en_tmp"),
     pytest.param("Bash", {"command": "echo x > .git/HEAD"}, "deny", id="bash_redireccion_git_dir"),
     pytest.param("Bash", {"command": "cd .. && rm -rf otro-repo"}, "deny", id="bash_rm_fuera_del_proyecto"),
     pytest.param("Bash", {"command": "echo x >> ~/.zshrc"}, "deny", id="bash_escritura_fuera_del_proyecto"),
@@ -119,10 +122,10 @@ def test_trace_lands_in_claude_config_dir_one_run_per_hook(claude) -> None:
 
 
 def test_log_viewer_renders_runs(claude) -> None:
-    claude("Bash", {"command": "rm -rf .git"})
+    claude("Bash", {"command": "cd .. && rm -rf otro-repo"})
     claude("Bash", {"command": "pytest -q"})
     out = run_command(
         f"python3 {PROJECT_DIR / 'scripts' / 'synapse_log.py'} --decision block --hook block_dangerous", {}, claude.env
     ).stdout
-    assert "━━" in out and "structure.git_dir" in out and "DECISION  BLOCK" in out
+    assert "━━" in out and "structure.outside_project" in out and "DECISION  BLOCK" in out
     assert "pytest -q" not in out

@@ -38,7 +38,7 @@ def test_every_step_of_a_run_is_logged(isolated_logs: Path) -> None:
     assert steps[0] == "input" and steps[-1] == "decision"
     assert "structure.git_dir" in steps
     assert records[0]["session"] == "abcd1234" and records[0]["command"] == "rm -rf .git"
-    assert records[-1]["decision"] == "block" and "ms" in records[-1]
+    assert records[-1]["decision"] == "ask" and "ms" in records[-1]
 
 
 def test_separate_runs_get_separate_ids(isolated_logs: Path) -> None:
@@ -86,3 +86,49 @@ def test_redact_keeps_non_secrets(text: str) -> None:
 )
 def test_redact_hides_secrets(text: str, secret: str) -> None:
     assert secret not in common.redact(text)
+
+
+def test_concurrent_writers_never_corrupt_lines(isolated_logs: Path) -> None:
+    # 4 hooks por tool_use y varias sesiones escriben a la vez: la traza real tenía líneas mezcladas y bytes NUL
+    import os
+    import subprocess
+    import sys
+
+    from support import HOOKS_DIR
+
+    big = "x" * 1990
+    code = (
+        f"import sys; sys.path.insert(0, {str(HOOKS_DIR)!r}); import common\n"
+        f"for i in range(120): common.log_step('carga', i=i, a={big!r}, b={big!r}, c={big!r}, d={big!r}, e={big!r})"
+    )
+    procs = [subprocess.Popen([sys.executable, "-c", code], env=os.environ.copy()) for _ in range(8)]
+    assert all(p.wait(60) == 0 for p in procs)
+    lines = common.get_log_file().read_bytes().split(b"\n")
+    assert lines[-1] == b""
+    assert len(lines[:-1]) == 8 * 120
+    assert all(json.loads(line)["step"] == "carga" for line in lines[:-1])
+
+
+def test_each_record_is_a_single_locked_write(isolated_logs: Path, monkeypatch) -> None:
+    # Un hook matado a mitad de escritura (timeout, ESC) dejaba '{"ts"' suelto: la línea va en un solo write()
+    import os
+
+    writes: list[bytes] = []
+    real_write = os.write
+    monkeypatch.setattr(common.os, "write", lambda fd, data: writes.append(bytes(data)) or real_write(fd, data))
+    common.log_step("x", **{f"f{i}": "y" * 1990 for i in range(6)})
+    assert len(writes) == 1 and writes[0].endswith(b"\n") and len(writes[0]) > 12000
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        pytest.param('{"ts": "a", "step": "s"}', {"ts": "a", "step": "s"}, id="linea_valida"),
+        pytest.param('{"ts"{"ts": "a", "step": "s"}', {"ts": "a", "step": "s"}, id="prefijo_truncado"),
+        pytest.param('\x00\x00\x00{"ts": "a"}', {"ts": "a"}, id="nul_antes_del_registro"),
+        pytest.param("\x00" * 64, None, id="solo_nul"),
+        pytest.param('{"ts": "a", "st', None, id="registro_cortado"),
+    ],
+)
+def test_parse_line_recovers_damaged_records(line: str, expected) -> None:
+    assert common.parse_log_line(line) == expected

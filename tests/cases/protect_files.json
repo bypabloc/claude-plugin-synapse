@@ -9,7 +9,7 @@
       "cwd": "{project}"
     },
     "expected_exit": 2,
-    "expected_in_stderr": "cannot modify protected"
+    "expected_in_stderr": "protect_files (python) · regla path.protected"
   },
   {
     "name": "protect_block_lockfile_package",
@@ -21,7 +21,7 @@
       "cwd": "{project}"
     },
     "expected_exit": 2,
-    "expected_in_stderr": "cannot modify protected"
+    "expected_in_stderr": "protect_files (python) · regla path.protected"
   },
   {
     "name": "protect_block_lockfile_uv",
@@ -33,7 +33,7 @@
       "cwd": "{project}"
     },
     "expected_exit": 2,
-    "expected_in_stderr": "cannot modify protected"
+    "expected_in_stderr": "protect_files (python) · regla path.protected"
   },
   {
     "name": "protect_block_env_file",
@@ -45,7 +45,7 @@
       "cwd": "{project}"
     },
     "expected_exit": 2,
-    "expected_in_stderr": "cannot modify protected"
+    "expected_in_stderr": "protect_files (python) · regla path.protected"
   },
   {
     "name": "protect_block_venv_internal",
@@ -57,7 +57,7 @@
       "cwd": "{project}"
     },
     "expected_exit": 2,
-    "expected_in_stderr": "cannot modify protected"
+    "expected_in_stderr": "protect_files (python) · regla path.protected"
   },
   {
     "name": "protect_allow_env_example_template",

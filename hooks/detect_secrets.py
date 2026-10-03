@@ -38,6 +38,7 @@ Ejemplos de Uso en CLI:
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import sys
@@ -52,6 +53,7 @@ from common import (
     log_step,
     read_hook_input,
     record_audit_log,
+    run_main,
     should_use_laya,
 )
 
@@ -95,14 +97,57 @@ SECRET_QUESTIONS = {
 }
 
 
+SENSITIVE_WORD_RE = re.compile(r"(?i)(token|key|secret|credential|auth|bearer|pass)")
+URL_WITH_PASSWORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s/:@'\"]+:[^\s/@'\"]+@")
+# Valores literales: entre comillas, o tras = / : sin comillas (FOO=valor en .env, YAML)
+LITERAL_RE = re.compile(r"""(['"`])([^'"`\s]{8,})\1|[=:]\s*([^\s'"`,;)\]}]{12,})""")
+IDENTIFIER_RE = re.compile(r"[a-z]+([_-][a-z0-9]+)+|[A-Z][A-Z0-9_]+")
+LAYA_MAX_SECRET_CHARS = 4000
+
+
+def _shannon(value: str) -> float:
+    counts = {c: value.count(c) for c in set(value)}
+    return -sum(n / len(value) * math.log2(n / len(value)) for n in counts.values())
+
+
+def looks_like_secret(value: str, near_keyword: bool) -> bool:
+    """Literal con forma de credencial: mezcla letras y dígitos, sin espacios, con entropía alta.
+
+    Rutas, URLs sin credenciales, nombres con puntos (a.b.c, versiones), identificadores snake/kebab,
+    CONSTANTES y texto natural no califican. En una línea con palabra sensible basta con 8 caracteres;
+    sin ella se exigen 16.
+    """
+    if "/" in value or value.startswith(("http", "$", "{", "<", "%")) or value.count(".") >= 2:
+        return False
+    if not (re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) or IDENTIFIER_RE.fullmatch(value):
+        return False
+    min_len = 8 if near_keyword else 16
+    return len(value) >= min_len and _shannon(value) >= (2.5 if near_keyword else 3.0)
+
+
+def candidate_lines(content: str) -> list[str]:
+    """Líneas con algo que podría ser una credencial real; sin ninguna, Laya no tiene nada que evaluar."""
+    found = []
+    for line in content.splitlines():
+        if URL_WITH_PASSWORD_RE.search(line):
+            found.append(line.strip())
+            continue
+        near = bool(SENSITIVE_WORD_RE.search(line))
+        values = [m.group(2) or m.group(3) for m in LITERAL_RE.finditer(line)]
+        if any(looks_like_secret(v, near) for v in values if v):
+            found.append(line.strip())
+    return found
+
+
 def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> None:
     """Evalúa si el contenido contiene secretos utilizando firmas y Laya System 1."""
     if not content or not content.strip():
         sys.exit(0)
 
     # Si contiene un placeholder o lectura de variable de entorno explícita, autorizar
+    target = f"<{len(content)} caracteres>"
     if PLACEHOLDER_RE.search(content):
-        record_audit_log("ALLOW", "detect_secrets", tool_name, f"<{len(content)} caracteres>", "Placeholder seguro detectado")
+        record_audit_log("ALLOW", "detect_secrets", tool_name, target, "Placeholder seguro detectado", rule="content.placeholder")
         sys.exit(0)
 
     # 1. Chequeo preliminar con patrones de alta precisión
@@ -116,43 +161,43 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> Non
     log_step("signatures", result="match" if found_pattern_desc else "no_match", category=found_pattern_desc, checked=len(HIGH_CONFIDENCE_PATTERNS))
     if found_pattern_desc:
         emit_block(
-            f"🚨 Possible secret detected!\n"
-            f"Type: {found_pattern_desc}\n"
-            "Please remove sensitive credentials or use environment variables instead.",
-            exit_code=2,
-            hook_name="detect_secrets",
-            tool_name=tool_name,
-            target=f"<{len(content)} caracteres>",
+            f"Posible secreto en el contenido: {found_pattern_desc}.\n"
+            "Quita la credencial o léela desde una variable de entorno.",
+            hook_name="detect_secrets", tool_name=tool_name, target=target,
+            decided_by="python", rule="signature", evidence={"category": found_pattern_desc},
         )
 
-    # 2. Si no es un patrón estático pero contiene asignaciones sospechosas, consultar a Laya System 1
-    suspicious = bool(re.search(r"(?i)(token|key|secret|credential|auth|bearer|pass)", content))
-    if suspicious and len(content) <= 4000 and should_use_laya():
+    # 2. Laya solo ve las líneas con literales candidatos (alta entropía, URL con contraseña): sin ninguno,
+    #    no hay credencial posible. En la traza real, 128 de 133 consultas por palabra clave fueron 'safe'.
+    candidates = candidate_lines(content)
+    log_step("candidates", count=len(candidates))
+    if not candidates:
+        log_step("laya", result="skipped", reason="sin literales candidatos (determinista)")
+    elif should_use_laya():
         try:
             router = get_laya_router()
-            res = router.predict(content, SECRET_QUESTIONS)
+            res = router.predict("\n".join(candidates)[:LAYA_MAX_SECRET_CHARS], SECRET_QUESTIONS)
             answers = res["answers"]
 
             status = answers["secret_status"]["choice"]
             status_conf = answers["secret_status"]["answer_confidence"]
             secret_type = answers["secret_type"]["choice"]
-            log_step("laya", status=status, status_conf=round(status_conf, 3), secret_type=secret_type)
+            log_step("laya", result="ok", status=status, status_conf=round(status_conf, 3), secret_type=secret_type)
 
             # Laya solo escala a confirmación: los bloqueos son las firmas deterministas de arriba
             if status == "confidential_secret" and status_conf >= 0.70 and secret_type != "none":
                 emit_decision(
                     "ask",
-                    f"Laya System 1 sospecha una credencial en el contenido ({secret_type}, confianza {status_conf:.2f}). "
-                    "Si es real, usa variables de entorno.",
-                    hook_name="detect_secrets",
-                    tool_name=tool_name,
-                    target=f"<{len(content)} caracteres>",
+                    f"el modelo sospecha una credencial en el contenido ({secret_type}, confianza {status_conf:.2f} ≥ 0.70, "
+                    f"{len(candidates)} línea(s) candidata(s)). Si es real, usa variables de entorno.",
+                    hook_name="detect_secrets", tool_name=tool_name, target=target, decided_by="laya", rule="laya.secret",
+                    evidence={"secret_type": secret_type, "confidence": round(status_conf, 3), "candidate_lines": len(candidates)},
                 )
-        except Exception:
-            # Fallback transparente a verificación por firmas estáticas
-            pass
+        except Exception as exc:
+            # Fallback a las firmas deterministas, pero el fallo queda en la traza
+            log_step("laya", result="error", error=repr(exc))
 
-    record_audit_log("ALLOW", "detect_secrets", tool_name, f"<{len(content)} caracteres>", "Contenido libre de secretos")
+    record_audit_log("ALLOW", "detect_secrets", tool_name, target, "Contenido libre de secretos", rule="sin_objeciones")
     sys.exit(0)
 
 
@@ -175,4 +220,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_main(main)

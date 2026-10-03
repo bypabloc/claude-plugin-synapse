@@ -47,7 +47,7 @@ def main() -> None:
     ap.add_argument("--out", default=str(ev.EVAL_DIR / "ft_delta.pt"))
     args = ap.parse_args()
 
-    router = ev.bd.get_laya_router()
+    router = ev.local_router()
     agent = router.load("english")
     model = agent.model
     n_layers = 1 + max(int(n.split(".")[2]) for n, _ in model.named_parameters() if n.startswith("encoder.layers."))

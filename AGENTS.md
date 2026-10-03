@@ -24,7 +24,8 @@ claude-plugin-synapse/
 │   └── plugin.json             # Manifiesto oficial del plugin
 ├── hooks/
 │   ├── hooks.json              # Mapeo PreToolUse -> scripts ejecutables
-│   ├── common.py               # Singleton de Laya, detección de GPU, logs y utilidades
+│   ├── common.py               # Cliente del daemon de Laya, alcance del proyecto, variables de shell, logs
+│   ├── laya_daemon.py          # Daemon que mantiene Laya en la GPU (socket Unix, apagado por inactividad)
 │   ├── block_dangerous.py      # Guardrail para herramienta Bash
 │   ├── block_env_read.py       # Guardrail para Read y comandos Bash sobre .env
 │   ├── detect_secrets.py       # Guardrail para Edit y Write (fuga de credenciales)
@@ -104,15 +105,26 @@ Claude Code invoca los scripts en `hooks/` pasando una carga útil JSON vía `st
 ### A. `block_dangerous.py` (Herramienta: `Bash`)
 - **Auto-Allow:** Comandos destructivos restringidos a `./tmp/**`, `/tmp/claude-*`, artefactos de build (`dist/`, `build/`, `.cache/`, `node_modules/`, `target/`), rutas gitignoreadas o archivos (no directorios) sin seguimiento git.
 - **Bloqueo determinista (exit 2), antes que todo lo demás:**
-  - Cualquier escritura en `.git/` con comandos de archivos (`rm`, `mv`, `cp` hacia, `sed -i`, `tee`, `>`/`>>`, `find -delete`...). Los comandos `git` no se ven afectados.
-  - Cualquier escritura fuera de la raíz del proyecto (toplevel git del `cwd`), siguiendo `cd` dentro del comando. Excepciones: scratchpad `/tmp/claude-*` y `/dev/null`/`/dev/std*`.
+  - Cualquier escritura fuera del entorno git del proyecto, siguiendo `cd` dentro del comando. Las raíces (`common.allowed_roots`) salen de `CLAUDE_PROJECT_DIR` (el `cwd` si no está definida): su toplevel git, el superproyecto si es un submódulo y todos los worktrees del repo. El `cwd` del hook nunca amplía el alcance, y un repo en `~` o `/` tampoco. Excepciones: scratchpad `/tmp/claude-*` y `/dev/null`/`/dev/std*`.
+  - Las variables se resuelven antes de decidir (`common.expand_word`): asignaciones y `for x in ...` del propio comando, luego el entorno, con `${X:-defecto}`. `p=/home/x; rm -rf "$p"` se bloquea; `for p in *; do rm -rf "$p"; done` dentro de `tmp/` se auto-aprueba. Lo no resoluble (`$(cmd)`, `` `cmd` ``, `$1`, `${x#y}`, `read x`) no se bloquea: solo pierde el auto-allow. Un glob como `.*` se evalúa como `..`.
+  - `rm link` no sigue el symlink (borra el enlace); `rm link/` y las escrituras sí lo siguen.
   - Ejecución de scripts remotos (`curl … | sh`), exfiltración de `~/.ssh`, `~/.aws`, `env` a la red, `authorized_keys`, shells reversas.
   - Escritura de archivos con contenido redactado por el agente (`agent_authored_write`): `echo`/`printf` redirigidos, `cat`/`tee` con heredoc, `sed -i`/`perl -i`, scripts `python3 - <<EOF` o `-c`/`-e` que escriben archivos. Se debe usar `Write`/`Edit`. Permitido: salida de herramientas (`pytest > tmp/log`, `cmd | tee log`, `git`, builds) y `echo "exit=$?" >> log` (solo expansiones de shell).
+- **Confirmación determinista (`ask`) por `.git`:** cualquier comando cuyos argumentos (o variables) apunten a una carpeta `.git`, sea lectura o escritura (`cat .git/HEAD`, `rm -rf .git`, `d=.git; rm -rf $d`). No cuentan los valores de flags de exclusión (`--exclude .git`, `--glob '!.git'`, `-name .git`) ni `.gitignore`/`.github`. Los bloqueos previos (escribir desde Bash, fuera del proyecto) siguen aplicando primero.
 - **Confirmación determinista (`ask`)**, evaluada antes del auto-allow: force push, `reset --hard`, `filter-branch`, `DROP DATABASE`, `crontab -r`, `aws s3 rb`, `sudo rm`, `history -c`.
-- **Laya:** solo escala a `ask`, nunca bloquea; los comandos rutinarios (`gh pr|run|issue`, `git status|add|commit|push`...) no pasan por Laya.
+- **Regla general: lo que el código puede decidir se decide antes de Laya.** Laya solo ve lo ambiguo. Lo vigila `python3 scripts/benchmark.py` (calidad en el banco de evaluación, consultas evitadas en la traza real, latencia y CPU/GPU); el recall de riesgosos no debe bajar respecto de "antes".
+  - `block_dangerous`: no consultan a Laya los comandos rutinarios (`gh pr|run|issue`, `git status|add|commit|push`...) ni los pipelines de solo lectura (`is_read_only`: `ls`, `rg`, `cat`, `sed -n`, `find` sin `-exec`, `git log|diff|show`...) cuyas rutas caen dentro del proyecto. Los binarios invocados por ruta, `less`, `set`, las lecturas fuera del proyecto (`/etc`, `/tmp`, `~`) y las sustituciones `$(...)` sí pasan por Laya. Un borrado permanente pide confirmación directamente, sin Laya.
+  - `protect_files`: archivos de credenciales por nombre o extensión (`.key`, `.pem`, `id_rsa`, `.npmrc`, `*.tfstate`, `credentials.json`, `kubeconfig`...) → `ask` determinista. Laya solo evalúa nombres con indicios sensibles no concluyentes (`secret_settings.py`).
+  - `detect_secrets`: Laya solo recibe las líneas con literales candidatos (alta entropía con letras y dígitos, o URL con contraseña). Sin candidatos no hay consulta.
+  - `block_env_read`: solo cuentan archivos `.env` reales entre los argumentos (no `os.environ`, `process.env.X`). Los usos que no muestran valores (`ls`, `test -f`, `cp`, `git check-ignore`, `--env-file`) pasan; el código embebido (heredoc, `-c`) que abre un `.env` se bloquea.
+- **Laya:** solo escala a `ask`, nunca bloquea.
+- **Atribución obligatoria:** todo `block`/`ask`/`allow` sale por `emit_block`/`emit_decision`, que exigen `decided_by` (`python` | `laya`) y `rule`. En pantalla: `Synapse · <hook> (python|laya) · regla <rule>: <motivo>` (stderr en los bloqueos, `permissionDecisionReason` en ask/allow). En la traza, el paso `decision` lleva `decided_by`, `rule`, `reason` y `evidence` (patrón, rutas, puntaje y umbral de Laya, confianza). Un `pass` queda atribuido a `laya` si se consultó a Laya y no objetó, o a `python` en otro caso.
+- **Todo run cierra con `decision`:** los `main` se ejecutan con `common.run_main`; las salidas tempranas quedan como `pass` con regla `exit.early` y un error interno se registra (step `error`, regla `hook.error`) antes de relanzarse. Los errores de Laya se registran (`laya result=error`) en los cuatro hooks.
+- **Retención de la traza:** al crear el archivo del día se borran los `AAAA-MM-DD.jsonl` más antiguos que `SYNAPSE_LOG_RETENTION_DAYS` (30 por defecto; `0` conserva todo).
   - Entrada: `command_evidence()` (comando sin comentarios ni cuerpos de heredoc + efectos detectados: qué borra, escribe, lee o envía).
   - Pregunta binaria `DANGER_QUESTION` con claves neutras `A`/`B`, siempre sobre el checkpoint `english`.
   - Modelo: delta afinado (4 capas superiores + cabeza) en `models/laya-block-dangerous-delta.safetensors` (Git LFS) y calibración Platt en `models/laya-block-dangerous.json`. Si el delta es solo un puntero LFS, usa el perfil `zeroshot` calibrado.
+- **Daemon de Laya (`hooks/laya_daemon.py`):** los hooks nunca importan torch; piden la inferencia por un socket Unix (`$XDG_RUNTIME_DIR/synapse/`, o `~/.cache/synapse/`) a un proceso que mantiene el checkpoint en la GPU. El primer hook lo levanta (~5 s), después cada inferencia toma ~30 ms. Las inferencias se serializan con un lock. El delta afinado se aplica solo durante la petición de `block_dangerous` y se revierte, así que los demás hooks ven el checkpoint base. Tras `SYNAPSE_LAYA_IDLE_SECONDS` sin uso (1200 por defecto) termina y libera la VRAM. Hay un daemon por instalación del plugin y por modo (`gpu`/`cpu`). Para detenerlo: `python3 hooks/laya_daemon.py stop gpu`. Los scripts de evaluación usan `laya_daemon.local_router()` en el mismo proceso.
   - Re-entrenar: `scripts/laya_eval.py` (dataset, scoring, calibración, `export`) + `scripts/laya_finetune.py`. Cambiar la pregunta o la entrada invalida delta y calibración.
 - **Bloqueo Duro (Exit 2):**
   - Borrado de sistema o raíz (`rm -rf /`, `rm -rf ~`, `rm -rf $HOME`).

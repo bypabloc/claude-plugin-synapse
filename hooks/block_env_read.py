@@ -61,6 +61,7 @@ from common import (
     read_hook_input,
     record_audit_log,
     resolve_path,
+    run_main,
     should_use_laya,
 )
 
@@ -119,6 +120,55 @@ def find_env_args_in_bash(command: str, cwd: str) -> list[str]:
     return hits
 
 
+SAFE_ENV_CMDS = {"ls", "eza", "exa", "stat", "test", "[", "[[", "file", "touch", "cp", "mv", "rm", "chmod", "mkdir", "du", "wc"}
+SAFE_GIT_ENV_SUBCMDS = {"check-ignore", "ls-files", "status", "add", "rm", "mv"}
+ENV_FILE_FLAGS = ("--env-file", "env_file")
+CODE_READ_RE = re.compile(r"open\(|read_text|readFileSync|readFile\(|file_get_contents|dotenv_values|File\.read|IO\.read")
+QUOTED_RE = re.compile(r"""['"]([^'"\n]+)['"]""")
+INTERPRETER_RE = re.compile(r"^(python|node|bun|deno|ruby|perl|php)[\d.]*$")
+
+
+def _is_env_token(token: str) -> bool:
+    name = os.path.basename(token.split("=", 1)[-1])
+    return is_env_file(name) or bool(re.match(r"^\.env[*?\[]", name))  # .env* también nombra archivos .env
+
+
+def env_mentions(command: str) -> list[tuple[list[str], int]]:
+    """(tokens del sub-comando, índice) de cada argumento que nombra un archivo .env."""
+    shell = re.sub(r"<<-?\s*(['\"]?)(\w+)\1\n.*?\n\2(\n|$)", "\n", command, flags=re.S)  # sin cuerpos de heredoc
+    found = []
+    for part in extract_bash_tokens(shell):
+        try:
+            tokens = shlex.split(part, posix=True)
+        except ValueError:
+            continue
+        found += [(tokens, i) for i, tok in enumerate(tokens) if i and _is_env_token(tok)]
+    return found
+
+
+def embedded_env_refs(command: str) -> list[str]:
+    """Código embebido (cuerpo de heredoc de un intérprete, -c/-e) que menciona un archivo .env entre comillas."""
+    codes = [m.group(3) for m in re.finditer(r"(\S+)\s+-?\s*<<-?\s*(['\"]?)\w+\2\n(.*?)\n\w+(\n|$)", command, flags=re.S)
+             if INTERPRETER_RE.match(os.path.basename(m.group(1)))]
+    try:
+        tokens = shlex.split(command.split("\n", 1)[0], posix=True)
+    except ValueError:
+        tokens = []
+    codes += [tokens[i + 1] for i, t in enumerate(tokens[:-1]) if t in {"-c", "-e", "--eval"}]
+    return [code for code in codes if any(_is_env_token(q) for q in QUOTED_RE.findall(code))]
+
+
+def _is_safe_env_use(mention: tuple[list[str], int]) -> bool:
+    tokens, i = mention
+    if tokens[i - 1] in ENV_FILE_FLAGS or tokens[i].startswith(ENV_FILE_FLAGS):
+        return True
+    cmd = os.path.basename(tokens[0])
+    if cmd == "git":
+        sub = next((t for t in tokens[1:] if not t.startswith("-")), "")
+        return sub in SAFE_GIT_ENV_SUBCMDS
+    return cmd in SAFE_ENV_CMDS
+
+
 def evaluate_bash_env_read(command: str, cwd: str) -> None:
     """Inspecciona el comando Bash combinando analisis sintactico y clasificacion semantica Laya."""
     if not command.strip():
@@ -127,38 +177,45 @@ def evaluate_bash_env_read(command: str, cwd: str) -> None:
     # 1. Chequeo rapido sintactico de comandos de lectura tradicionales
     hits = find_env_args_in_bash(command, cwd)
     log_step("syntax.env_read", result="match" if hits else "no_match", hits=hits)
+    bash = {"hook_name": "block_env_read", "tool_name": "Bash"}
+    source_hint = "Usa 'set -a; source <env-file>; set +a' para cargar variables en el proceso sin exponer valores."
     if hits:
-        record_audit_log("BLOCKED", "block_env_read", "Bash", hits[0], "Lectura directa de archivo .env con comando Bash")
-        sys.stderr.write(build_env_block_message(hits[0]) + "\n")
-        sys.exit(2)
+        emit_block(build_env_block_message(hits[0]), target=hits[0], decided_by="python", rule="syntax.env_read",
+                   evidence={"files": hits}, **bash)
 
-    # Si el comando no contiene menciones a .env ni variantes, permitir de inmediato
-    if not re.search(r"\.env", command, re.IGNORECASE):
-        record_audit_log("ALLOW", "block_env_read", "Bash", command, "Comando sin referencia a .env")
+    # Sin un archivo .env real entre los argumentos ni en el código embebido, no hay nada que evaluar.
+    # (`os.environ`, `process.env.X`, `load_dotenv` no son archivos: antes llegaban a Laya por el texto ".env")
+    mentions = env_mentions(command)
+    body_refs = embedded_env_refs(command)
+    if not mentions and not body_refs:
+        record_audit_log("ALLOW", "block_env_read", "Bash", command, "Comando sin referencia a archivos .env", rule="env.no_reference")
         sys.exit(0)
+
+    # Código embebido (heredoc, -c/-e) que abre un .env: lectura programática, igual que la regla de una línea
+    if any(CODE_READ_RE.search(code) for code in body_refs):
+        emit_block(f"Lectura programática de archivo .env en código embebido (heredoc o -c/-e).\nComando: {command}\n{source_hint}",
+                   target=command, decided_by="python", rule="syntax.embedded_env_read", **bash)
 
     # Permitir patron legitimo de source explicito
     if re.search(r"(?:^|\s|;)(?:source|\.)\s+[^\s;&|]+\.env", command):
         # Verificar que no contenga pipes hacia comandos de impresion o echo
         if not any(f"| {rc}" in command or f"|{rc}" in command for rc in READ_COMMANDS):
-            record_audit_log("ALLOW", "block_env_read", "Bash", command, "Carga legítima mediante source autorizada")
+            record_audit_log("ALLOW", "block_env_read", "Bash", command, "Carga legítima mediante source autorizada", rule="env.source")
             sys.exit(0)
 
     # Detección determinística de lectura mediante scripts de una línea (Python, Node, Ruby, Perl)
     scripting_read_pat = r"(?i)(?:python\d*|node|perl|ruby|php)\s+.*(?:\.read\(|readFileSync|open\(|file_get_contents).*\.env"
     if re.search(scripting_read_pat, command):
-        record_audit_log("BLOCKED", "block_env_read", "Bash", command, "Lectura programática de .env detectada")
-        emit_block(
-            f"Intento de lectura directa/programática de archivo .env detectado.\n"
-            f"Comando: {command}\n"
-            f"Usa 'set -a; source <env-file>; set +a' para cargar variables en el proceso sin exponer valores.",
-            exit_code=2,
-            hook_name="block_env_read",
-            tool_name="Bash",
-            target=command,
-        )
+        emit_block(f"Lectura programática de archivo .env con un script de una línea.\nComando: {command}\n{source_hint}",
+                   target=command, decided_by="python", rule="syntax.script_env_read", **bash)
 
-    # 2. Evaluación semántica con Laya System 1 (si GPU/CUDA está disponible o se solicitó Laya)
+    # Usos que nunca muestran el contenido: listar, comprobar, copiar/mover, git sin diff, --env-file
+    if mentions and not body_refs and all(_is_safe_env_use(m) for m in mentions):
+        log_step("laya", result="skipped", reason="uso seguro de .env (determinista)")
+        record_audit_log("ALLOW", "block_env_read", "Bash", command, "Uso de .env que no expone valores", rule="env.safe_use")
+        sys.exit(0)
+
+    # 2. Evaluación semántica con Laya System 1, solo para lo que el código no resuelve
     if should_use_laya():
         try:
             router = get_laya_router()
@@ -167,23 +224,18 @@ def evaluate_bash_env_read(command: str, cwd: str) -> None:
 
             intent = answers["env_intent"]["choice"]
             conf = answers["env_intent"]["answer_confidence"]
-            log_step("laya", intent=intent, confidence=round(conf, 3))
+            log_step("laya", result="ok", intent=intent, confidence=round(conf, 3))
 
             # Laya solo escala a confirmación: los bloqueos de .env son las reglas sintácticas de arriba
             if intent == "read_or_exfiltrate" and conf >= 0.70:
-                emit_decision(
-                    "ask",
-                    "Laya System 1 sospecha lectura de un archivo .env. "
-                    "Para cargar variables sin exponerlas usa 'set -a; source <env-file>; set +a'.",
-                    hook_name="block_env_read",
-                    tool_name="Bash",
-                    target=command,
-                )
-        except Exception:
-            # Fallback transparente a reglas determinísticas
-            pass
+                emit_decision("ask", f"el modelo sospecha lectura de un archivo .env (confianza {conf:.2f} ≥ 0.70). {source_hint}",
+                              target=command, decided_by="laya", rule="laya.env_intent",
+                              evidence={"intent": intent, "confidence": round(conf, 3)}, **bash)
+        except Exception as exc:
+            # Fallback a las reglas deterministas, pero el fallo queda en la traza
+            log_step("laya", result="error", error=repr(exc))
 
-    record_audit_log("ALLOW", "block_env_read", "Bash", command, "Comando seguro autorizado")
+    record_audit_log("ALLOW", "block_env_read", "Bash", command, "Comando seguro autorizado", rule="sin_objeciones")
     sys.exit(0)
 
 
@@ -199,10 +251,9 @@ def main() -> None:
         file_path = data.get("tool_input", {}).get("file_path", "")
         resolved = resolve_path(file_path, cwd)
         if resolved and is_env_file(resolved):
-            record_audit_log("BLOCKED", "block_env_read", "Read", resolved, "Lectura directa con herramienta Read")
-            sys.stderr.write(build_env_block_message(resolved) + "\n")
-            sys.exit(2)
-        record_audit_log("ALLOW", "block_env_read", "Read", file_path, "Lectura permitida (no es .env sensible)")
+            emit_block(build_env_block_message(resolved), hook_name="block_env_read", tool_name="Read", target=resolved,
+                       decided_by="python", rule="read_tool.env_file")
+        record_audit_log("ALLOW", "block_env_read", "Read", file_path, "Lectura permitida (no es .env sensible)", rule="read_tool.not_env")
         sys.exit(0)
 
     if tool_name == "Bash":
@@ -213,4 +264,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_main(main)
