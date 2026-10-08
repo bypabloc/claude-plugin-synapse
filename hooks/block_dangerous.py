@@ -62,6 +62,8 @@ from datetime import datetime
 
 from common import (
     HARMLESS_DEVICES,
+    REDIRECT_GLUED_RE,
+    REDIRECT_OP_RE,
     TMP_SEGMENT_RE,
     ShellVars,
     allowed_roots,
@@ -357,6 +359,72 @@ def is_read_only(command: str, cwd: str | None = None, roots: tuple[str, ...] = 
         elif cmd not in READ_ONLY_CMDS:
             return False
     return True
+
+
+# Gestores de paquetes que solo reconcilian el proyecto con su propio lockfile: sin nombres de paquete,
+# sin instalación global y sin rutas fuera del proyecto. `uv add`, `bun install pkg` o `uv run` siguen a Laya.
+LOCKFILE_SUBCMDS = {"uv": {"lock", "sync"}, "bun": {"install"}, "pnpm": {"install"}}
+LOCKFILE_VALUE_FLAGS = {
+    "--directory", "--project", "--python", "-p", "--cwd", "-C", "--dir", "--cache-dir", "--config-file",
+    "--extra", "--group", "--only-group", "--no-group", "--package",
+}
+GLOBAL_INSTALL_FLAGS = {"-g", "--global"}
+
+
+def _is_lockfile_subcommand(tokens: list[str], cwd: str | None, roots: tuple[str, ...]) -> bool:
+    allowed = LOCKFILE_SUBCMDS.get(tokens[0]) if tokens else None
+    if not allowed or GLOBAL_INSTALL_FLAGS.intersection(tokens):
+        return False
+    positionals: list[str] = []
+    rest = iter(tokens[1:])
+    for tok in rest:
+        if tok in LOCKFILE_VALUE_FLAGS:
+            next(rest, None)
+        elif not tok.startswith("-"):
+            positionals.append(tok)
+    return len(positionals) == 1 and positionals[0] in allowed and _reads_inside(tokens[1:], cwd, roots)
+
+
+def _without_redirects(tokens: list[str]) -> list[str]:
+    kept: list[str] = []
+    skip_next = False
+    for tok in tokens:
+        if skip_next:
+            skip_next = False
+        elif REDIRECT_OP_RE.fullmatch(tok):
+            skip_next = True
+        elif not REDIRECT_GLUED_RE.match(tok):
+            kept.append(tok)
+    return kept
+
+
+def is_lockfile_sync(command: str, cwd: str | None = None, roots: tuple[str, ...] = ()) -> bool:
+    """True si el comando regenera o sincroniza el lockfile del proyecto (uv lock|sync, bun|pnpm install).
+
+    Los demás sub-comandos deben ser de solo lectura (cd, tail...). Escribir el lockfile es su trabajo
+    propio, igual que un build: Laya puntuaba solo las palabras y pedía confirmación sin motivo.
+    """
+    if SUBSHELL_RE.search(command) or split_heredocs(command)[1] or SECRET_PATH_RE.search(command):
+        return False
+    eff_cwd = cwd
+    found = False
+    for sc in extract_bash_tokens(command):
+        try:
+            tokens = shlex.split(sc, posix=True)
+        except ValueError:
+            return False
+        targets = [t for t in redirect_targets(sc) if not t.startswith(HARMLESS_DEVICES)]
+        if tokens and tokens[0] in LOCKFILE_SUBCMDS and not any(not TMP_SEGMENT_RE.search(t) for t in targets):
+            if not _is_lockfile_subcommand(_without_redirects(tokens), eff_cwd, roots):
+                return False
+            found = True
+            continue
+        if not is_read_only(sc, eff_cwd, roots):
+            return False
+        if tokens and tokens[0] == "cd":
+            dest = resolve_candidates(tokens[1] if len(tokens) > 1 else "~", {}, eff_cwd)
+            eff_cwd = dest[0] if dest and len(dest) == 1 else None
+    return found
 
 
 HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
@@ -703,6 +771,8 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
         log_step("laya", result="skipped", reason="comando rutinario")
     elif is_read_only(command, cwd, roots):
         log_step("laya", result="skipped", reason="solo lectura (determinista)")
+    elif is_lockfile_sync(command, cwd, roots):
+        log_step("laya", result="skipped", reason="sincronización de lockfile (determinista)")
     elif not should_use_laya():
         log_step("laya", result="skipped", reason="modo fallback")
     else:
