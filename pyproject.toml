@@ -1,6 +1,6 @@
 [project]
 name = "claude-plugin-synapse"
-version = "1.3.0"
+version = "1.3.1"
 description = "Real-time security guardrails and PreToolUse interceptors for Claude Code powered by Laya System 1"
 readme = "README.md"
 requires-python = ">=3.10"

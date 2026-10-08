@@ -196,6 +196,8 @@ def test_ambiguous_sensitive_name_reaches_laya(tmp_path) -> None:
         '{"password": "Contraseña", "token_expired": "Tu sesión expiró, vuelve a ingresar"}',
         "def refresh_token(self, key: str) -> str:\n    return self.client.auth(key)\n",
         "TOKEN_TTL_SECONDS = 3600\nSECRET_HEADER = 'X-Api-Key'\n",
+        "| `CuentaPortal` | `PortalAccount` (+ `webauthn_user_id` BinaryField(32), único, default callable `secrets.token_bytes(32)`) |",
+        "nonce = secrets.token_urlsafe(32)\nkey = hashlib.sha256(b'x').hexdigest()\n",
     ],
 )
 def test_content_without_candidate_literals_skips_laya(tmp_path, content: str) -> None:
@@ -211,6 +213,12 @@ def test_candidate_lines_reach_laya_alone(tmp_path, line: str) -> None:
     router.predict.assert_called_once()
     state = router.predict.call_args.args[0]
     assert line in state and "print('hola')" not in state
+
+
+def test_literal_passed_as_call_argument_still_reaches_laya(tmp_path) -> None:
+    line = "client = Client(credential='aB3dE5fG7hJ9kL1mN3pQ')"
+    _, router = run("detect_secrets", "Write", {"file_path": "a.py", "content": line}, tmp_path)
+    router.predict.assert_called_once()
 
 
 # ------------------------------------------------------------------ block_env_read
