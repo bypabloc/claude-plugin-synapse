@@ -8,6 +8,8 @@ pipelines de solo lectura (ls, rg, git log, sed -n).
 from __future__ import annotations
 
 import importlib
+import json
+import subprocess
 from unittest import mock
 
 import pytest
@@ -110,6 +112,17 @@ def test_permanent_delete_asks_without_laya() -> None:
     decision, router = run("block_dangerous", "Bash", {"command": "rm src/app.py"}, repo)
     assert decision == "ask"
     router.predict.assert_not_called()
+
+
+def test_recoverable_delete_allows_with_checkout_hint() -> None:
+    repo = make_git_repo("gate_recoverable", tracked={"src/app.py": "x = 1\n", "src/b.py": "b\n"}, untracked={})
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "commit", "-qm", "init"], check=True)
+    payload = {"tool_name": "Bash", "tool_input": {"command": "rm -rf src && rmdir src 2>/dev/null"}, "cwd": str(repo)}
+    result = run_in_process("block_dangerous", payload)
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert output["permissionDecision"] == "allow"
+    assert "git checkout" in output["additionalContext"]
 
 
 # ------------------------------------------------------------------ protect_files

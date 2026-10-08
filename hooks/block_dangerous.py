@@ -71,6 +71,7 @@ from common import (
     extract_bash_tokens,
     get_laya_router,
     is_disposable_target,
+    is_git_recoverable,
     is_outside_project,
     is_system_tmp,
     log_step,
@@ -567,8 +568,12 @@ def _block(reason: str, target: str, rule: str, evidence: dict[str, Any] | None 
     emit_block(reason, hook_name="block_dangerous", tool_name="Bash", target=target, decided_by="python", rule=rule, evidence=evidence)
 
 
-def _decide(decision: str, reason: str, target: str, rule: str, decided_by: str = "python", evidence: dict[str, Any] | None = None) -> None:
-    emit_decision(decision, reason, hook_name="block_dangerous", tool_name="Bash", target=target, decided_by=decided_by, rule=rule, evidence=evidence)
+def _decide(
+    decision: str, reason: str, target: str, rule: str, decided_by: str = "python", evidence: dict[str, Any] | None = None, context: str | None = None
+) -> None:
+    emit_decision(
+        decision, reason, hook_name="block_dangerous", tool_name="Bash", target=target, decided_by=decided_by, rule=rule, evidence=evidence, context=context
+    )
 
 
 def evaluate_command_safety(command: str, cwd: str) -> None:
@@ -590,8 +595,10 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
     eff_cwd: str | None = cwd  # None tras un `cd` a un destino no determinable
     variables: ShellVars = {}
     destructive_targets: list[str] = []
+    recoverable_targets: list[str] = []
     git_refs: list[str] = []
     all_targets_disposable = True
+    all_targets_safe = True  # desechables o recuperables con git checkout
     has_destructive_cmd = False
     for sc in extract_bash_tokens(command):
         if track_variables(sc, variables, eff_cwd):
@@ -628,13 +635,20 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
         if cmd in DESTRUCTIVE_CMDS:
             has_destructive_cmd = True
             if not paths:
-                all_targets_disposable = False
+                all_targets_disposable = all_targets_safe = False
             for p in paths:
                 destructive_targets.append(p)
                 candidates = resolve_candidates(p, variables, eff_cwd)
                 disposable = bool(candidates) and all(is_disposable_target(c, eff_cwd or os.path.dirname(c)) for c in candidates or [])
+                recoverable = not disposable and bool(candidates) and all(
+                    is_disposable_target(c, eff_cwd or os.path.dirname(c)) or is_git_recoverable(c, eff_cwd or os.path.dirname(c))
+                    for c in candidates or []
+                )
                 all_targets_disposable = all_targets_disposable and disposable
-                log_step("structure.delete_target", target=p, resolved=candidates, disposable=disposable)
+                all_targets_safe = all_targets_safe and (disposable or recoverable)
+                if recoverable:
+                    recoverable_targets += candidates or []
+                log_step("structure.delete_target", target=p, resolved=candidates, disposable=disposable, recoverable=recoverable)
     log_step("structure", result="ok", roots=roots)
 
     # 2b. Escribir archivos con contenido propio desde Bash está prohibido: para eso existen Write/Edit
@@ -662,6 +676,14 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
     if has_destructive_cmd and all_targets_disposable and destructive_targets:
         _decide("allow", f"Auto-aprobado: todos los objetivos son temporales desechables ({targets}).", targets, "structure.disposable_delete",
                 evidence={"targets": destructive_targets})
+
+    # 4b. Borrado de contenido commiteado sin cambios locales: git lo restaura idéntico, no hace falta preguntar.
+    #     El recordatorio va como additionalContext para que la sesión sepa cómo deshacerlo.
+    if has_destructive_cmd and all_targets_safe and recoverable_targets:
+        rels = " ".join(shlex.quote(os.path.relpath(t, cwd)) for t in dict.fromkeys(recoverable_targets))
+        _decide("allow", f"Auto-aprobado: los objetivos están commiteados sin cambios locales ({targets}).", targets, "structure.git_recoverable_delete",
+                evidence={"targets": destructive_targets, "recoverable": recoverable_targets},
+                context=f"Synapse: se puede hacer git checkout para recuperar el archivo (git checkout HEAD -- {rels}).")
 
     # 5. Borrado de archivos permanentes: la confirmación es segura, Laya no cambiaría la decisión
     if has_destructive_cmd and not all_targets_disposable:

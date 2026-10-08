@@ -100,7 +100,7 @@
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "rm hooks/common.py"
+        "command": "rm hooks/not_in_git_history.py"
       },
       "cwd": "{project}"
     },
@@ -944,7 +944,7 @@
   },
   {
     "name": "ask_rm_tracked_after_heredoc_with_apostrophe",
-    "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 - <<'EOF'\nprint(\"don't\")\nEOF\nrm -f README.md"}, "cwd": "{project}"},
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 - <<'EOF'\nprint(\"don't\")\nEOF\nrm -f docs/not_in_git_history.md"}, "cwd": "{project}"},
     "expected_exit": 0,
     "expected_decision": "ask"
   },
