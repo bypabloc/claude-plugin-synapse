@@ -102,6 +102,8 @@ URL_WITH_PASSWORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s/:@'\"]+:[^\s/
 # Valores literales: entre comillas, o tras = / : sin comillas (FOO=valor en .env, YAML)
 LITERAL_RE = re.compile(r"""(['"`])([^'"`\s]{8,})\1|[=:]\s*([^\s'"`,;)\]}]{12,})""")
 IDENTIFIER_RE = re.compile(r"[a-z]+([_-][a-z0-9]+)+|[A-Z][A-Z0-9_]+")
+# Llamadas a función (secrets.token_bytes(32), hashlib.sha256(...)): código, no un valor
+CALL_EXPR_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\(")
 LAYA_MAX_SECRET_CHARS = 4000
 
 
@@ -114,10 +116,12 @@ def looks_like_secret(value: str, near_keyword: bool) -> bool:
     """Literal con forma de credencial: mezcla letras y dígitos, sin espacios, con entropía alta.
 
     Rutas, URLs sin credenciales, nombres con puntos (a.b.c, versiones), identificadores snake/kebab,
-    CONSTANTES y texto natural no califican. En una línea con palabra sensible basta con 8 caracteres;
-    sin ella se exigen 16.
+    CONSTANTES, llamadas a función y texto natural no califican. En una línea con palabra sensible
+    basta con 8 caracteres; sin ella se exigen 16.
     """
     if "/" in value or value.startswith(("http", "$", "{", "<", "%")) or value.count(".") >= 2:
+        return False
+    if CALL_EXPR_RE.match(value):
         return False
     if not (re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) or IDENTIFIER_RE.fullmatch(value):
         return False
