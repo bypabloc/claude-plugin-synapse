@@ -54,6 +54,7 @@ BUILD_ARTIFACT_DIRS = {
     ".coverage", ".nyc_output", ".turbo", "dist", "build", ".next",
     ".nuxt", ".angular", "target", "coverage", ".parcel-cache",
 }
+REGENERABLE_CACHE_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
 
 # Patrones para archivos .env y sufijos de plantillas
 ENV_NAME_RE = re.compile(r"^\.env(\..+)?$|\.env$")
@@ -525,7 +526,8 @@ def is_git_recoverable(path: str, cwd: str) -> bool:
         return False
     for entry in filter(None, proc.stdout.split("\0")):
         p = Path(entry[3:])
-        regenerable = any(part in BUILD_ARTIFACT_DIRS for part in p.parts) or p.suffix.lower() in BUILD_ARTIFACT_EXTS
+        # Solo caches que el intérprete regenera; .bak/.log/build/ pueden ser trabajo manual
+        regenerable = any(part in REGENERABLE_CACHE_DIRS for part in p.parts) or p.suffix.lower() in {".pyc", ".pyo"}
         if not (entry.startswith("!!") and regenerable):
             return False
     return True

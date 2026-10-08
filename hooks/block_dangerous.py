@@ -632,6 +632,8 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
                         "structure.outside_project",
                         {"subcmd": sc, "target": resolved, "roots": list(roots)},
                     )
+        if cmd not in DESTRUCTIVE_CMDS and not (is_routine(sc) or is_read_only(sc, eff_cwd or cwd, roots)):
+            all_targets_safe = False  # el auto-allow recuperable no puede aprobar de rebote otro sub-comando
         if cmd in DESTRUCTIVE_CMDS:
             has_destructive_cmd = True
             if not paths:
@@ -640,7 +642,9 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
                 destructive_targets.append(p)
                 candidates = resolve_candidates(p, variables, eff_cwd)
                 disposable = bool(candidates) and all(is_disposable_target(c, eff_cwd or os.path.dirname(c)) for c in candidates or [])
-                recoverable = not disposable and bool(candidates) and all(
+                # `rm -rf link/` entra al destino del enlace: lo recuperable es el enlace, no lo que borra
+                through_link = p.endswith("/") and any(os.path.islink(c.rstrip("/")) for c in candidates or [])
+                recoverable = not disposable and not through_link and bool(candidates) and all(
                     is_disposable_target(c, eff_cwd or os.path.dirname(c)) or is_git_recoverable(c, eff_cwd or os.path.dirname(c))
                     for c in candidates or []
                 )
@@ -680,10 +684,13 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
     # 4b. Borrado de contenido commiteado sin cambios locales: git lo restaura idéntico, no hace falta preguntar.
     #     El recordatorio va como additionalContext para que la sesión sepa cómo deshacerlo.
     if has_destructive_cmd and all_targets_safe and recoverable_targets:
-        rels = " ".join(shlex.quote(os.path.relpath(t, cwd)) for t in dict.fromkeys(recoverable_targets))
+        # Rutas absolutas con -C al repo dueño: el hint funciona tras un `cd` y en repos anidados o submódulos
+        hint = " && ".join(
+            f"git -C {shlex.quote(os.path.dirname(t))} checkout HEAD -- {shlex.quote(t)}" for t in dict.fromkeys(recoverable_targets)
+        )
         _decide("allow", f"Auto-aprobado: los objetivos están commiteados sin cambios locales ({targets}).", targets, "structure.git_recoverable_delete",
                 evidence={"targets": destructive_targets, "recoverable": recoverable_targets},
-                context=f"Synapse: se puede hacer git checkout para recuperar el archivo (git checkout HEAD -- {rels}).")
+                context=f"Synapse: se puede hacer git checkout para recuperar el archivo ({hint}).")
 
     # 5. Borrado de archivos permanentes: la confirmación es segura, Laya no cambiaría la decisión
     if has_destructive_cmd and not all_targets_disposable:

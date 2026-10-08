@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib
 import json
 import subprocess
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -123,6 +124,43 @@ def test_recoverable_delete_allows_with_checkout_hint() -> None:
     output = json.loads(result.stdout)["hookSpecificOutput"]
     assert output["permissionDecision"] == "allow"
     assert "git checkout" in output["additionalContext"]
+
+
+def _recoverable_repo(name: str) -> Path:
+    repo = make_git_repo(name, tracked={"src/app.py": "x = 1\n"}, untracked={})
+    (repo / "data").mkdir()
+    (repo / "data/p.txt").write_text("sin seguimiento\n")
+    (repo / "link").symlink_to("data")
+    subprocess.run(["git", "-C", str(repo), "add", "link"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "init"], check=True)
+    return repo
+
+
+def _decision(command: str, repo: Path) -> dict:
+    result = run_in_process("block_dangerous", {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(repo)})
+    return json.loads(result.stdout)["hookSpecificOutput"] if result.stdout else {}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("rm -rf link/", id="symlink_con_barra_borra_el_destino"),
+        pytest.param("rm src/app.py && npm install", id="compuesto_con_subcomando_no_borrado"),
+    ],
+)
+def test_recoverable_delete_not_auto_allowed(command: str) -> None:
+    repo = _recoverable_repo("gate_recoverable_edge")
+    assert _decision(command, repo).get("permissionDecision") != "allow"
+
+
+def test_recoverable_hint_restores_after_cd() -> None:
+    repo = _recoverable_repo("gate_recoverable_hint")
+    output = _decision("cd src && rm app.py", repo)
+    assert output["permissionDecision"] == "allow"
+    (repo / "src/app.py").unlink()
+    hint = output["additionalContext"].split("(", 1)[1].rstrip(").")
+    subprocess.run(hint, shell=True, cwd=repo / "src", check=True)
+    assert (repo / "src/app.py").read_text() == "x = 1\n"
 
 
 # ------------------------------------------------------------------ protect_files

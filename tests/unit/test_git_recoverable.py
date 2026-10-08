@@ -21,7 +21,8 @@ def repo():
             "clean_dir/sub/b.ts": "b\n",
             "dirty_dir/a.ts": "a\n",
             "cache_dir/a.py": "a\n",
-            ".gitignore": "*.env\n__pycache__/\n",
+            "backup_dir/a.py": "a\n",
+            ".gitignore": "*.env\n__pycache__/\n*.bak\n",
         },
         untracked={},
     )
@@ -32,6 +33,7 @@ def repo():
     (path / "cache_dir/__pycache__").mkdir()
     (path / "cache_dir/__pycache__/a.pyc").write_text("pyc\n")
     (path / "clean_dir/local.env").write_text("SECRET=x\n")
+    (path / "backup_dir/a.py.bak").write_text("respaldo manual\n")
     (path / "src/staged.py").write_text("z = 1\n")
     subprocess.run([*git, "add", "src/staged.py"], check=True)
     for flag, rel in (("--skip-worktree", "src/skipped.py"), ("--assume-unchanged", "src/assumed.py")):
@@ -59,6 +61,7 @@ def repo():
         pytest.param("src/skipped.py", False, id="skip_worktree_oculta_cambios_locales"),
         pytest.param("src/assumed.py", False, id="assume_unchanged_oculta_cambios_locales"),
         pytest.param("nested_repo", False, id="repo_anidado_borraria_su_historial"),
+        pytest.param("backup_dir", False, id="directorio_con_respaldo_ignorado_bak"),
     ],
 )
 def test_git_recoverable_targets(repo, target: str, expected: bool) -> None:
