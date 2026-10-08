@@ -54,6 +54,7 @@ BUILD_ARTIFACT_DIRS = {
     ".coverage", ".nyc_output", ".turbo", "dist", "build", ".next",
     ".nuxt", ".angular", "target", "coverage", ".parcel-cache",
 }
+REGENERABLE_CACHE_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
 
 # Patrones para archivos .env y sufijos de plantillas
 ENV_NAME_RE = re.compile(r"^\.env(\..+)?$|\.env$")
@@ -344,17 +345,23 @@ def emit_decision(
     decided_by: str,
     rule: str,
     evidence: dict[str, Any] | None = None,
+    context: str | None = None,
 ) -> None:
-    """Emite 'allow' o 'ask' en formato PreToolUse. El motivo visible empieza con quién decidió y la regla."""
+    """Emite 'allow' o 'ask' en formato PreToolUse. El motivo visible empieza con quién decidió y la regla.
+
+    `context` llega al modelo como additionalContext: queda en la conversación para turnos siguientes.
+    """
     shown = f"{attribution(hook_name, decided_by, rule)}: {reason}"
     record_audit_log(decision.lower(), hook_name, tool_name, target, reason, decided_by=decided_by, rule=rule, evidence=evidence)
-    payload = {
+    payload: dict[str, Any] = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": decision,
             "permissionDecisionReason": shown,
         }
     }
+    if context:
+        payload["hookSpecificOutput"]["additionalContext"] = context
     sys.stdout.write(json.dumps(payload))
     sys.exit(0)
 
@@ -482,6 +489,48 @@ def is_git_untracked_file(path: str, cwd: str) -> bool:
         return res.returncode != 0
     except Exception:
         return False
+
+
+def is_git_recoverable(path: str, cwd: str) -> bool:
+    """Detecta un archivo o directorio que `git checkout HEAD -- <ruta>` restaura idéntico tras borrarlo.
+
+    Exige contenido rastreado y commiteado sin ningún cambio local (modificado, solo en index, sin
+    seguimiento o ignorado). Lo ignorado solo se tolera si es un artefacto regenerable (caches, build).
+    Un directorio con `.git` propio (raíz del repo, repo anidado) nunca es recuperable: se perdería su historial.
+    `skip-worktree`/`assume-unchanged` tampoco: ocultan a `git status` cambios locales que checkout no restaura.
+    """
+    resolved = resolve_path(path, cwd)
+    if not os.path.lexists(resolved):
+        return False
+    is_dir = os.path.isdir(resolved) and not os.path.islink(resolved)
+    if is_dir and os.path.lexists(os.path.join(resolved, ".git")):
+        return False
+    parent = resolved if is_dir else os.path.dirname(resolved)
+    toplevel = _git_lines(parent, "rev-parse", "--show-toplevel")
+    home = Path.home()
+    if not toplevel or os.path.realpath(toplevel[0]) in (os.path.realpath(str(home / ".claude")), os.path.realpath(str(home))):
+        return False
+    tracked = _git_lines(parent, "ls-files", "-v", "--", resolved)
+    if not tracked or any(line[0].islower() or line[0] == "S" for line in tracked):
+        return False
+    try:
+        proc = subprocess.run(
+            ["git", "-C", parent, "status", "--porcelain", "-z", "--ignored", "--untracked-files=all", "--", resolved],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return False
+    if proc.returncode != 0:
+        return False
+    for entry in filter(None, proc.stdout.split("\0")):
+        p = Path(entry[3:])
+        # Solo caches que el intérprete regenera; .bak/.log/build/ pueden ser trabajo manual
+        regenerable = any(part in REGENERABLE_CACHE_DIRS for part in p.parts) or p.suffix.lower() in {".pyc", ".pyo"}
+        if not (entry.startswith("!!") and regenerable):
+            return False
+    return True
 
 
 def is_disposable_target(path: str, cwd: str) -> bool:
