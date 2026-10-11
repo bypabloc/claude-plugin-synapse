@@ -98,12 +98,17 @@ SECRET_QUESTIONS = {
 
 
 SENSITIVE_WORD_RE = re.compile(r"(?i)(token|key|secret|credential|auth|bearer|pass)")
-URL_WITH_PASSWORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s/:@'\"]+:[^\s/@'\"]+@")
+URL_WITH_PASSWORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://([^\s/:@'\"]+):([^\s/@'\"]+)@")
 # Valores literales: entre comillas, o tras = / : sin comillas (FOO=valor en .env, YAML)
 LITERAL_RE = re.compile(r"""(['"`])([^'"`\s]{8,})\1|[=:]\s*([^\s'"`,;)\]}]{12,})""")
 IDENTIFIER_RE = re.compile(r"[a-z]+([_-][a-z0-9]+)+|[A-Z][A-Z0-9_]+")
 # Llamadas a función (secrets.token_bytes(32), hashlib.sha256(...)): código, no un valor
 CALL_EXPR_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\(")
+# Par clave=valor dentro de un literal ('csrftoken=tok123', cookies, query strings): se evalúa solo el valor
+KEY_VALUE_RE = re.compile(r"^[A-Za-z_][\w.-]*=(.*)$")
+# Sintaxis de código (Pick<E2eTest, fn(x), arr[0]): un token real no la contiene
+CODE_SYNTAX_RE = re.compile(r"[<>()\[\]{}]")
+HEX_RE = re.compile(r"[0-9a-fA-F]+")
 LAYA_MAX_SECRET_CHARS = 4000
 
 
@@ -116,9 +121,15 @@ def looks_like_secret(value: str, near_keyword: bool) -> bool:
     """Literal con forma de credencial: mezcla letras y dígitos, sin espacios, con entropía alta.
 
     Rutas, URLs sin credenciales, nombres con puntos (a.b.c, versiones), identificadores snake/kebab,
-    CONSTANTES, llamadas a función y texto natural no califican. En una línea con palabra sensible
-    basta con 8 caracteres; sin ella se exigen 16.
+    CONSTANTES, llamadas a función, sintaxis de tipos, hashes hex cortos (commits, < 32) y texto natural
+    no califican. En `clave=valor` cuenta solo el valor. En una línea con palabra sensible basta con
+    8 caracteres; sin ella se exigen 16.
     """
+    key_value = KEY_VALUE_RE.match(value)
+    if key_value:
+        value = key_value.group(1)
+    if CODE_SYNTAX_RE.search(value) or (HEX_RE.fullmatch(value) and len(value) < 32):
+        return False
     if "/" in value or value.startswith(("http", "$", "{", "<", "%")) or value.count(".") >= 2:
         return False
     if CALL_EXPR_RE.match(value):
@@ -133,7 +144,8 @@ def candidate_lines(content: str) -> list[str]:
     """Líneas con algo que podría ser una credencial real; sin ninguna, Laya no tiene nada que evaluar."""
     found = []
     for line in content.splitlines():
-        if URL_WITH_PASSWORD_RE.search(line):
+        # Contraseñas de fixture (u:p@h, postgres:postgres@) no son credenciales: < 4 caracteres o igual al usuario
+        if any(len(pw) >= 4 and pw != user for user, pw in URL_WITH_PASSWORD_RE.findall(line)):
             found.append(line.strip())
             continue
         near = bool(SENSITIVE_WORD_RE.search(line))
