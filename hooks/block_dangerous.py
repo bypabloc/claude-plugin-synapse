@@ -116,9 +116,10 @@ CATASTROPHIC_PATTERNS = [
     r"dd\s+if=.*\s+of=/dev/",
     r">\s*/dev/sd[a-z]",
     r"chmod\s+(-[a-zA-Z]*R[a-zA-Z]*\s+)?(777|0777)\s+/(\s|\*|$)",
-    r"git\s+push\s+.*(--force|-f)\b.*\b(origin\s+)?(main|master|dev)\b",
-    r"git\s+push\s+.*\b(origin\s+)?(main|master|dev)\b.*(--force|-f)\b",
-    r"git\s+push\s+--force-with-lease\s+.*\b(origin\s+)?(main|master|dev)\b",
+    # [^;&|\n]*: el flag y la rama deben estar en el MISMO git push, no en sub-comandos posteriores
+    r"git\s+push\s+[^;&|\n]*(--force|-f)\b[^;&|\n]*\b(origin\s+)?(main|master|dev)\b",
+    r"git\s+push\s+[^;&|\n]*\b(origin\s+)?(main|master|dev)\b[^;&|\n]*(--force|-f)\b",
+    r"git\s+push\s+--force-with-lease\s+[^;&|\n]*\b(origin\s+)?(main|master|dev)\b",
     r"git\s+branch\s+(-D|-d\s+--force|--delete\s+--force)\s+(main|master|dev)\b",
     r"git\s+clean\s+(-[a-zA-Z]*f[a-zA-Z]*d[a-zA-Z]*x?|-[a-zA-Z]*d[a-zA-Z]*f[a-zA-Z]*x?)\b",
     r"chmod\s+(-[a-zA-Z]+\s+)*0?777\s+/(etc|usr|bin|sbin|var|boot|lib|lib64|opt|root)\b",
@@ -137,7 +138,7 @@ CATASTROPHIC_PATTERNS = [
 
 # Operaciones recuperables solo con esfuerzo: siempre requieren confirmación humana
 ASK_PATTERNS = [
-    r"git\s+push\b.*(--force\b|--force-with-lease\b|\s-f\b)",
+    r"git\s+push\b[^;&|\n]*(--force\b|--force-with-lease\b|\s-f\b)",
     r"git\s+filter-(branch|repo)\b",
     r"git\s+reset\s+--hard\b",
     r"(?i)\bdrop\s+(database|schema|table)\b",
@@ -678,6 +679,7 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
     #    /tmp del sistema, carpeta .git y objetivos de borrado
     roots = allowed_roots(cwd)
     eff_cwd: str | None = cwd  # None tras un `cd` a un destino no determinable
+    prev_cwd: str | None = None
     variables: ShellVars = {}
     destructive_targets: list[str] = []
     recoverable_targets: list[str] = []
@@ -691,8 +693,12 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
         cmd, paths = parse_command_targets(sc)
         git_refs += git_dir_refs(sc, variables, eff_cwd)
         if cmd == "cd":
-            dest = resolve_candidates(paths[0] if paths else "~", variables, eff_cwd)
-            eff_cwd = dest[0] if dest and len(dest) == 1 else None
+            if sc.split()[1:2] == ["-"]:  # vuelve al directorio anterior (OLDPWD); desconocido al inicio
+                eff_cwd, prev_cwd = prev_cwd, eff_cwd
+            else:
+                prev_cwd = eff_cwd
+                dest = resolve_candidates(paths[0] if paths else "~", variables, eff_cwd)
+                eff_cwd = dest[0] if dest and len(dest) == 1 else None
             if eff_cwd and is_outside_project(eff_cwd, "/", roots):
                 log_step("structure.cd_outside", target=eff_cwd, roots=roots)
             continue

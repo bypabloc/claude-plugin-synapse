@@ -1026,5 +1026,27 @@
     "name": "pass_http_server_serving_project_dir",
     "payload": {"tool_name": "Bash", "tool_input": {"command": "python3 -m http.server 8080 --directory dist"}, "cwd": "{project}"},
     "expected_exit": 0
+  },
+  {
+    "name": "pass_push_delete_then_other_force_and_master",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "git push -q origin --delete fix/x 2>&1 | tail -1; git worktree remove .worktrees/fix-x --force && git checkout -q master"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "dangerous_block_force_push_flag_after_branch",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "git fetch && git push origin dev -f"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "catastrófico"
+  },
+  {
+    "name": "pass_cd_dash_returns_to_project",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "cd tmp && cd - >/dev/null; rm -f tmp/old.log"}, "cwd": "{project}"},
+    "expected_exit": 0
+  },
+  {
+    "name": "block_cd_dash_back_to_outside_dir",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "cd ~ && cd {project}/tmp && cd - && rm -rf .agents/skills"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "fuera del proyecto"
   }
 ]
