@@ -38,6 +38,7 @@ Ejemplos de Uso en CLI:
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -57,6 +58,7 @@ from common import (
     should_use_laya,
 )
 
+PASSWORD_PATTERN = r"(?i)password\s*[:=]\s*[\"']([^\"']{8,})[\"']"
 HIGH_CONFIDENCE_PATTERNS = [
     (r"-----BEGIN (?:RSA|OPENSSH|DSA|EC|PGP)?\s?PRIVATE KEY-----", "Private cryptographic key"),
     (r"sk-(?:proj-)?[a-zA-Z0-9_\-]{20,}", "OpenAI API Key format"),
@@ -67,8 +69,10 @@ HIGH_CONFIDENCE_PATTERNS = [
     (r"xox[baprs]-[0-9a-zA-Z]{10,48}", "Slack Token format"),
     (r"(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{24,}", "Stripe API Key format"),
     (r"(?i)api[_-]?key\s*[:=]\s*[\"']([a-zA-Z0-9_\-]{24,})[\"']", "Generic API Key assignment"),
-    (r"(?i)password\s*[:=]\s*[\"']([^\"']{8,})[\"']", "Plaintext password assignment"),
+    (PASSWORD_PATTERN, "Plaintext password assignment"),
 ]
+# Excepción por proyecto: valores exactos que la firma de contraseña no bloquea (enums, mensajes de validación)
+PROJECT_SECRETS_CONFIG = os.path.join(".claude", "synapse-secrets.json")
 
 # Placeholders y valores mock conocidos delimitados por palabras
 PLACEHOLDER_RE = re.compile(
@@ -155,7 +159,36 @@ def candidate_lines(content: str) -> list[str]:
     return found
 
 
-def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> None:
+def project_password_values(cwd: str = "") -> frozenset[str]:
+    """`password_rule_values` de $CLAUDE_PROJECT_DIR (o cwd)/.claude/synapse-secrets.json.
+
+    Archivo ausente o inválido -> conjunto vacío (la firma bloquea como siempre).
+    """
+    root = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
+    if not root:
+        return frozenset()
+    try:
+        with open(os.path.join(root, PROJECT_SECRETS_CONFIG), encoding="utf-8") as fh:
+            values = json.load(fh).get("password_rule_values")
+    except (OSError, ValueError, AttributeError):
+        return frozenset()
+    if not isinstance(values, list):
+        return frozenset()
+    return frozenset(v for v in values if isinstance(v, str))
+
+
+def signature_match(content: str, allowed_passwords: frozenset[str]) -> str | None:
+    """Primera firma que coincide; la de contraseña se omite solo si TODOS sus valores están en la lista exacta."""
+    for pattern, desc in HIGH_CONFIDENCE_PATTERNS:
+        if pattern == PASSWORD_PATTERN:
+            if any(m.group(1) not in allowed_passwords for m in re.finditer(pattern, content)):
+                return desc
+        elif re.search(pattern, content):
+            return desc
+    return None
+
+
+def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write", cwd: str = "") -> None:
     """Evalúa si el contenido contiene secretos utilizando firmas y Laya System 1."""
     if not content or not content.strip():
         sys.exit(0)
@@ -167,12 +200,7 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> Non
         sys.exit(0)
 
     # 1. Chequeo preliminar con patrones de alta precisión
-    found_pattern_desc: str | None = None
-    for pattern, desc in HIGH_CONFIDENCE_PATTERNS:
-        match = re.search(pattern, content)
-        if match:
-            found_pattern_desc = desc
-            break
+    found_pattern_desc = signature_match(content, project_password_values(cwd))
 
     log_step("signatures", result="match" if found_pattern_desc else "no_match", category=found_pattern_desc, checked=len(HIGH_CONFIDENCE_PATTERNS))
     if found_pattern_desc:
@@ -232,7 +260,7 @@ def main() -> None:
     else:
         sys.exit(0)
 
-    evaluate_content_secrets(content, tool_name)
+    evaluate_content_secrets(content, tool_name, data.get("cwd", ""))
 
 
 if __name__ == "__main__":
