@@ -94,6 +94,11 @@ CASES = [
     pytest.param("rg -n x --glob '!.git' .", ".", ".", "pass", id="exclusion_de_git_no_cuenta"),
     pytest.param("rsync -a --exclude .git client/ tmp/copia", ".", ".", "pass", id="rsync_exclude_git"),
     pytest.param("touch .gitignore .github/x.yml", ".", ".", "pass", id="gitignore_no_es_git_dir"),
+    pytest.param("jq -c '.git' tmp/report.json", ".", ".", "pass", id="filtro_jq_no_es_git_dir"),
+    pytest.param("rg -n '.git' src", ".", ".", "pass", id="patron_rg_no_es_git_dir"),
+    pytest.param("jq -r .x .git/config", ".", ".", "ask", id="jq_sobre_git_dir"),
+    pytest.param("grep -e x .git/config", ".", ".", "ask", id="grep_e_sobre_git_dir"),
+    pytest.param("jq -f .git/filtro.jq tmp/x.json", ".", ".", "ask", id="jq_f_desde_git_dir"),
 ]
 
 

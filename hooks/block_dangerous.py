@@ -116,9 +116,10 @@ CATASTROPHIC_PATTERNS = [
     r"dd\s+if=.*\s+of=/dev/",
     r">\s*/dev/sd[a-z]",
     r"chmod\s+(-[a-zA-Z]*R[a-zA-Z]*\s+)?(777|0777)\s+/(\s|\*|$)",
-    r"git\s+push\s+.*(--force|-f)\b.*\b(origin\s+)?(main|master|dev)\b",
-    r"git\s+push\s+.*\b(origin\s+)?(main|master|dev)\b.*(--force|-f)\b",
-    r"git\s+push\s+--force-with-lease\s+.*\b(origin\s+)?(main|master|dev)\b",
+    # [^;&|\n]*: el flag y la rama deben estar en el MISMO git push, no en sub-comandos posteriores
+    r"git\s+push\s+[^;&|\n]*(--force|-f)\b[^;&|\n]*\b(origin\s+)?(main|master|dev)\b",
+    r"git\s+push\s+[^;&|\n]*\b(origin\s+)?(main|master|dev)\b[^;&|\n]*(--force|-f)\b",
+    r"git\s+push\s+--force-with-lease\s+[^;&|\n]*\b(origin\s+)?(main|master|dev)\b",
     r"git\s+branch\s+(-D|-d\s+--force|--delete\s+--force)\s+(main|master|dev)\b",
     r"git\s+clean\s+(-[a-zA-Z]*f[a-zA-Z]*d[a-zA-Z]*x?|-[a-zA-Z]*d[a-zA-Z]*f[a-zA-Z]*x?)\b",
     r"chmod\s+(-[a-zA-Z]+\s+)*0?777\s+/(etc|usr|bin|sbin|var|boot|lib|lib64|opt|root)\b",
@@ -137,7 +138,7 @@ CATASTROPHIC_PATTERNS = [
 
 # Operaciones recuperables solo con esfuerzo: siempre requieren confirmación humana
 ASK_PATTERNS = [
-    r"git\s+push\b.*(--force\b|--force-with-lease\b|\s-f\b)",
+    r"git\s+push\b[^;&|\n]*(--force\b|--force-with-lease\b|\s-f\b)",
     r"git\s+filter-(branch|repo)\b",
     r"git\s+reset\s+--hard\b",
     r"(?i)\bdrop\s+(database|schema|table)\b",
@@ -190,16 +191,33 @@ PATTERN_FLAGS = {
 }
 
 
+# Comandos cuyo primer argumento posicional es un programa o patrón, no una ruta (jq '.git', rg '.git' src).
+# Con -e/-f el programa va en el flag y el primer posicional ya es un archivo.
+PROGRAM_FIRST_CMDS = {"jq", "yq", "gojq", "grep", "egrep", "fgrep", "rg", "ag", "sed", "awk", "gawk", "mawk"}
+PROGRAM_FLAG_RE = re.compile(r"^(-[ef]|--(regexp|file|expression|from-file))(=|$)")
+
+
+def _program_arg_index(tokens: list[str], subcmd: str) -> int | None:
+    cmd, _ = parse_command_targets(subcmd)
+    if cmd not in PROGRAM_FIRST_CMDS or any(PROGRAM_FLAG_RE.match(t) for t in tokens):
+        return None
+    start = next((i for i, t in enumerate(tokens) if os.path.basename(t) == cmd), None)
+    if start is None:
+        return None
+    return next((i for i in range(start + 1, len(tokens)) if not tokens[i].startswith("-")), None)
+
+
 def git_dir_refs(subcmd: str, variables: ShellVars, cwd: str | None) -> list[str]:
     """Argumentos del sub-comando que apuntan a una carpeta .git (también vía variables: d=.git; rm -rf $d)."""
     try:
         tokens = shlex.split(subcmd, posix=True)
     except ValueError:
         return []
+    program = _program_arg_index(tokens, subcmd)
     refs: list[str] = []
     prev = ""
-    for tok in tokens:
-        if prev not in PATTERN_FLAGS and not tok.startswith("-"):
+    for i, tok in enumerate(tokens):
+        if i != program and prev not in PATTERN_FLAGS and not tok.startswith("-"):
             values = expand_word(tok, variables, cwd) if "$" in tok else [tok]
             if any(touches_git_dir(v) for v in values or []):
                 refs.append(tok)
@@ -661,6 +679,7 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
     #    /tmp del sistema, carpeta .git y objetivos de borrado
     roots = allowed_roots(cwd)
     eff_cwd: str | None = cwd  # None tras un `cd` a un destino no determinable
+    prev_cwd: str | None = None
     variables: ShellVars = {}
     destructive_targets: list[str] = []
     recoverable_targets: list[str] = []
@@ -674,8 +693,12 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
         cmd, paths = parse_command_targets(sc)
         git_refs += git_dir_refs(sc, variables, eff_cwd)
         if cmd == "cd":
-            dest = resolve_candidates(paths[0] if paths else "~", variables, eff_cwd)
-            eff_cwd = dest[0] if dest and len(dest) == 1 else None
+            if sc.split()[1:2] == ["-"]:  # vuelve al directorio anterior (OLDPWD); desconocido al inicio
+                eff_cwd, prev_cwd = prev_cwd, eff_cwd
+            else:
+                prev_cwd = eff_cwd
+                dest = resolve_candidates(paths[0] if paths else "~", variables, eff_cwd)
+                eff_cwd = dest[0] if dest and len(dest) == 1 else None
             if eff_cwd and is_outside_project(eff_cwd, "/", roots):
                 log_step("structure.cd_outside", target=eff_cwd, roots=roots)
             continue

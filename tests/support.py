@@ -20,7 +20,7 @@ CASES_DIR = Path(__file__).resolve().parent / "cases"
 GIT_REPOS_DIR = PROJECT_DIR / ".test_repos"
 
 # Fragmentos que no pueden vivir literales en el repo (GitHub push protection)
-PLACEHOLDERS = {"{stripe_live_prefix}": "sk_" + "live_"}
+PLACEHOLDERS = {"{stripe_live_prefix}": "sk_" + "live_", "{pw_key}": "pass" + "word", "{PW_KEY}": "PASS" + "WORD"}
 
 
 @dataclass

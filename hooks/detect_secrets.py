@@ -38,6 +38,7 @@ Ejemplos de Uso en CLI:
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -57,6 +58,7 @@ from common import (
     should_use_laya,
 )
 
+PASSWORD_PATTERN = r"(?i)password\s*[:=]\s*[\"']([^\"']{8,})[\"']"
 HIGH_CONFIDENCE_PATTERNS = [
     (r"-----BEGIN (?:RSA|OPENSSH|DSA|EC|PGP)?\s?PRIVATE KEY-----", "Private cryptographic key"),
     (r"sk-(?:proj-)?[a-zA-Z0-9_\-]{20,}", "OpenAI API Key format"),
@@ -67,8 +69,10 @@ HIGH_CONFIDENCE_PATTERNS = [
     (r"xox[baprs]-[0-9a-zA-Z]{10,48}", "Slack Token format"),
     (r"(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{24,}", "Stripe API Key format"),
     (r"(?i)api[_-]?key\s*[:=]\s*[\"']([a-zA-Z0-9_\-]{24,})[\"']", "Generic API Key assignment"),
-    (r"(?i)password\s*[:=]\s*[\"']([^\"']{8,})[\"']", "Plaintext password assignment"),
+    (PASSWORD_PATTERN, "Plaintext password assignment"),
 ]
+# Excepción por proyecto: valores exactos que la firma de contraseña no bloquea (enums, mensajes de validación)
+PROJECT_SECRETS_CONFIG = os.path.join(".claude", "synapse-secrets.json")
 
 # Placeholders y valores mock conocidos delimitados por palabras
 PLACEHOLDER_RE = re.compile(
@@ -98,12 +102,17 @@ SECRET_QUESTIONS = {
 
 
 SENSITIVE_WORD_RE = re.compile(r"(?i)(token|key|secret|credential|auth|bearer|pass)")
-URL_WITH_PASSWORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s/:@'\"]+:[^\s/@'\"]+@")
+URL_WITH_PASSWORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://([^\s/:@'\"]+):([^\s/@'\"]+)@")
 # Valores literales: entre comillas, o tras = / : sin comillas (FOO=valor en .env, YAML)
 LITERAL_RE = re.compile(r"""(['"`])([^'"`\s]{8,})\1|[=:]\s*([^\s'"`,;)\]}]{12,})""")
 IDENTIFIER_RE = re.compile(r"[a-z]+([_-][a-z0-9]+)+|[A-Z][A-Z0-9_]+")
 # Llamadas a función (secrets.token_bytes(32), hashlib.sha256(...)): código, no un valor
 CALL_EXPR_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\(")
+# Par clave=valor dentro de un literal ('csrftoken=tok123', cookies, query strings): se evalúa solo el valor
+KEY_VALUE_RE = re.compile(r"^[A-Za-z_][\w.-]*=(.*)$")
+# Sintaxis de código (Pick<E2eTest, fn(x), arr[0]): un token real no la contiene
+CODE_SYNTAX_RE = re.compile(r"[<>()\[\]{}]")
+HEX_RE = re.compile(r"[0-9a-fA-F]+")
 LAYA_MAX_SECRET_CHARS = 4000
 
 
@@ -116,9 +125,15 @@ def looks_like_secret(value: str, near_keyword: bool) -> bool:
     """Literal con forma de credencial: mezcla letras y dígitos, sin espacios, con entropía alta.
 
     Rutas, URLs sin credenciales, nombres con puntos (a.b.c, versiones), identificadores snake/kebab,
-    CONSTANTES, llamadas a función y texto natural no califican. En una línea con palabra sensible
-    basta con 8 caracteres; sin ella se exigen 16.
+    CONSTANTES, llamadas a función, sintaxis de tipos, hashes hex cortos (commits, < 32) y texto natural
+    no califican. En `clave=valor` cuenta solo el valor. En una línea con palabra sensible basta con
+    8 caracteres; sin ella se exigen 16.
     """
+    key_value = KEY_VALUE_RE.match(value)
+    if key_value:
+        value = key_value.group(1)
+    if CODE_SYNTAX_RE.search(value) or (HEX_RE.fullmatch(value) and len(value) < 32):
+        return False
     if "/" in value or value.startswith(("http", "$", "{", "<", "%")) or value.count(".") >= 2:
         return False
     if CALL_EXPR_RE.match(value):
@@ -133,7 +148,8 @@ def candidate_lines(content: str) -> list[str]:
     """Líneas con algo que podría ser una credencial real; sin ninguna, Laya no tiene nada que evaluar."""
     found = []
     for line in content.splitlines():
-        if URL_WITH_PASSWORD_RE.search(line):
+        # Contraseñas de fixture (u:p@h, postgres:postgres@) no son credenciales: < 4 caracteres o igual al usuario
+        if any(len(pw) >= 4 and pw != user for user, pw in URL_WITH_PASSWORD_RE.findall(line)):
             found.append(line.strip())
             continue
         near = bool(SENSITIVE_WORD_RE.search(line))
@@ -143,7 +159,36 @@ def candidate_lines(content: str) -> list[str]:
     return found
 
 
-def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> None:
+def project_password_values(cwd: str = "") -> frozenset[str]:
+    """`password_rule_values` de $CLAUDE_PROJECT_DIR (o cwd)/.claude/synapse-secrets.json.
+
+    Archivo ausente o inválido -> conjunto vacío (la firma bloquea como siempre).
+    """
+    root = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
+    if not root:
+        return frozenset()
+    try:
+        with open(os.path.join(root, PROJECT_SECRETS_CONFIG), encoding="utf-8") as fh:
+            values = json.load(fh).get("password_rule_values")
+    except (OSError, ValueError, AttributeError):
+        return frozenset()
+    if not isinstance(values, list):
+        return frozenset()
+    return frozenset(v for v in values if isinstance(v, str))
+
+
+def signature_match(content: str, allowed_passwords: frozenset[str]) -> str | None:
+    """Primera firma que coincide; la de contraseña se omite solo si TODOS sus valores están en la lista exacta."""
+    for pattern, desc in HIGH_CONFIDENCE_PATTERNS:
+        if pattern == PASSWORD_PATTERN:
+            if any(m.group(1) not in allowed_passwords for m in re.finditer(pattern, content)):
+                return desc
+        elif re.search(pattern, content):
+            return desc
+    return None
+
+
+def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write", cwd: str = "") -> None:
     """Evalúa si el contenido contiene secretos utilizando firmas y Laya System 1."""
     if not content or not content.strip():
         sys.exit(0)
@@ -155,12 +200,7 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write") -> Non
         sys.exit(0)
 
     # 1. Chequeo preliminar con patrones de alta precisión
-    found_pattern_desc: str | None = None
-    for pattern, desc in HIGH_CONFIDENCE_PATTERNS:
-        match = re.search(pattern, content)
-        if match:
-            found_pattern_desc = desc
-            break
+    found_pattern_desc = signature_match(content, project_password_values(cwd))
 
     log_step("signatures", result="match" if found_pattern_desc else "no_match", category=found_pattern_desc, checked=len(HIGH_CONFIDENCE_PATTERNS))
     if found_pattern_desc:
@@ -220,7 +260,7 @@ def main() -> None:
     else:
         sys.exit(0)
 
-    evaluate_content_secrets(content, tool_name)
+    evaluate_content_secrets(content, tool_name, data.get("cwd", ""))
 
 
 if __name__ == "__main__":

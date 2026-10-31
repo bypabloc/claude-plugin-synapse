@@ -244,6 +244,11 @@ def test_ambiguous_sensitive_name_reaches_laya(tmp_path) -> None:
         "TOKEN_TTL_SECONDS = 3600\nSECRET_HEADER = 'X-Api-Key'\n",
         "| `CuentaPortal` | `PortalAccount` (+ `webauthn_user_id` BinaryField(32), único, default callable `secrets.token_bytes(32)`) |",
         "nonce = secrets.token_urlsafe(32)\nkey = hashlib.sha256(b'x').hexdigest()\n",
+        # Falsos positivos de la traza real (2026-10-10/11)
+        "document.cookie = 'csrftoken=tok123'",
+        "const env = ['DATABASE_DSN=postgres://u:p@h/db']",
+        "const selection: KeySelection = { mode: 'git', hash: '0123456789ab' }",
+        "export const testKeyOf = (test: Pick<E2eTest, 'file' | 'title'>): string =>",
     ],
 )
 def test_content_without_candidate_literals_skips_laya(tmp_path, content: str) -> None:
@@ -259,6 +264,20 @@ def test_candidate_lines_reach_laya_alone(tmp_path, line: str) -> None:
     router.predict.assert_called_once()
     state = router.predict.call_args.args[0]
     assert line in state and "print('hola')" not in state
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "document.cookie = 'session" + "id=aB3dE5fG7hJ9kL1m'",
+        "DSN = 'postgres://app:" + "Xk82mQ" + "@db/app'",
+        "API_SECRET = '" + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" + "'",
+    ],
+    ids=["clave_valor_con_valor_real", "url_con_password_real", "hex_largo"],
+)
+def test_real_looking_values_still_reach_laya(tmp_path, line: str) -> None:
+    _, router = run("detect_secrets", "Write", {"file_path": "a.py", "content": line}, tmp_path)
+    router.predict.assert_called_once()
 
 
 def test_literal_passed_as_call_argument_still_reaches_laya(tmp_path) -> None:
