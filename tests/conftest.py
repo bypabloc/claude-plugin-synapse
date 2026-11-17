@@ -41,6 +41,10 @@ def engine_mode(laya_flag: str):
     import laya_daemon
 
     sys.argv.append(laya_flag)
+    # Laya está apagada por defecto: con --laya cpu|gpu se enciende el switch para todos los hooks
+    saved_switch = {k: os.environ.pop(k, None) for k in ("SYNAPSE_LAYA", "SYNAPSE_LAYA_HOOKS")}
+    if laya_flag != LAYA_FLAGS["off"]:
+        os.environ["SYNAPSE_LAYA"] = "on"
     common.allowed_roots.cache_clear()
     os.environ["SYNAPSE_RUNTIME_DIR"] = str(GIT_REPOS_DIR / "rt")
     yield
@@ -50,6 +54,10 @@ def engine_mode(laya_flag: str):
         except OSError:
             pass
     os.environ.pop("SYNAPSE_RUNTIME_DIR", None)
+    os.environ.pop("SYNAPSE_LAYA", None)
+    for key, value in saved_switch.items():
+        if value is not None:
+            os.environ[key] = value
     sys.argv.remove(laya_flag)
     shutil.rmtree(GIT_REPOS_DIR, ignore_errors=True)
 

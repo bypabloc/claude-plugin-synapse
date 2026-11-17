@@ -14,7 +14,8 @@
 ## 1b. Escritura de Archivos: Solo con Write/Edit
 - **Prohibido escribir archivos desde Bash** con contenido propio: `echo`/`printf` redirigidos, `cat > f <<EOF`, `tee f <<EOF`, `sed -i`, `perl -i`, `python3 - <<EOF … open(p, 'w')`, `python3 -c`/`node -e` que escriben. El hook lo bloquea (exit 2).
 - **Usar las tools de Claude Code**: `Write` para archivos nuevos o completos, `Edit` para cambios parciales (`replace_all` para reemplazos repetidos). El cambio queda revisable como diff.
-- **Permitido**: salida de herramientas (`pytest > tmp/out.log`, `npm test | tee tmp/log`, `git`, builds, formatters) y estados de shell (`echo "exit=$?" >> tmp/log`).
+- **Permitido**: salida de herramientas (`pytest > tmp/out.log`, `npm test | tee tmp/log`, `git`, builds, formatters), estados de shell (`echo "exit=$?" >> tmp/log`) y texto desechable cuyo destino es `./tmp/`, el scratchpad `/tmp/claude-*` o un `*.log` (consultas SQL de prueba, cuerpos de PR). El código y la documentación del proyecto siempre van por `Write`/`Edit`.
+- **`/tmp` del sistema**: redirigir la salida de un programa ahí pide confirmación; borrar o escribir texto propio ahí se bloquea.
 
 ## 2. Protección de Credenciales y Archivos `.env`
 - **Bloqueo de Lectura Directa**: Queda terminantemente bloqueada la lectura del contenido de archivos `.env*` a través de herramientas de lectura (`Read`) o utilidades de shell (`cat`, `head`, `tail`, `awk`, `sed`, `grep`, `cut`, `base64`, `xxd`).
@@ -32,4 +33,5 @@
 
 ## 4. Protección de Integridad del Repositorio
 - **Archivos Críticos Inmutables**: Se bloquea la modificación arbitraria de lockfiles (`package-lock.json`, `bun.lock`, `yarn.lock`, `uv.lock`, `poetry.lock`) y directorios de infraestructura (`.git/`, `node_modules/`, `.venv/`).
-- **Confirmación Requerida (`ask`)**: La modificación de configuraciones del agente (`.claude/settings.json`, `.claude/hooks/**`) requiere confirmación interactiva explícita del usuario.
+- **Confirmación Requerida (`ask`)**: La modificación de configuraciones del agente (`.claude/settings.json`, `.claude/hooks/**`) y de Synapse (`.claude/synapse-*.json`) requiere confirmación interactiva explícita del usuario.
+- **Carpeta `.git`**: leerla (`cat .git/HEAD`, `ls .git/worktrees`) no pregunta; modificarla o borrar algo dentro pide confirmación.

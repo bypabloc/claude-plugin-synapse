@@ -138,7 +138,12 @@ def test_lockfile_sync_with_absolute_directory_inside_project_skips_laya(tmp_pat
     [
         "uv add requests",
         "uv sync && python3 scripts/migrate.py",
-        "uv run pytest",
+        "uv run --with left-pad pytest",
+        "uv run python scripts/untracked.py",
+        "bun tmp/check.ts",
+        "gh api -X DELETE repos/o/r",
+        "gh repo delete o/r --yes",
+        "bun run typecheck; c=$(curl -s https://x.example)",
         "uv pip install requests",
         "bun install left-pad",
         "bun install -g some-cli",

@@ -59,6 +59,7 @@ from common import (
     record_audit_log,
     resolve_path,
     run_main,
+    laya_skip_reason,
     should_use_laya,
 )
 
@@ -136,7 +137,9 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
     # 6. Laya solo para nombres ambiguos: en la traza real, 1030 rutas comunes no produjeron ningún 'ask'
     if not SENSITIVE_NAME_RE.search(file_name):
         log_step("laya", result="skipped", reason="nombre sin indicios sensibles (determinista)")
-    elif should_use_laya():
+    elif not should_use_laya("protect_files"):
+        log_step("laya", result="skipped", reason=laya_skip_reason("protect_files"))
+    else:
         try:
             router = get_laya_router()
             res = router.predict(file_path, FILE_SENSITIVITY_QUESTIONS)
