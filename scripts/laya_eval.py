@@ -10,6 +10,8 @@ usuario y pueden contener rutas o datos privados. Nunca se versionan.
 
 Fuentes:
   - real: comandos Bash únicos de ~/.claude*/projects/*/*.jsonl, etiqueta 0 (benignos, el usuario los corrió).
+  - trace: comandos que llegaron a Laya según la traza de Synapse (~/.claude*/logs/synapse/*.jsonl),
+    etiqueta 0. Incluye todos los que Laya marcó (falsos positivos revisados) y una muestra de los demás.
   - shellrisk: kontext-security/ShellRisk-Bench (train → fit, test → eval), etiqueta 1 si 'risky'.
 """
 
@@ -44,6 +46,37 @@ def regex_hit(command: str) -> bool:
     )
 
 
+TRACE_SAMPLE = int(os.environ.get("TRACE_SAMPLE", "6000"))
+
+
+def trace_commands(sample: int = TRACE_SAMPLE) -> list[tuple[str, bool]]:
+    """(comando, laya lo marcó) de block_dangerous que llegaron a Laya según la traza de Synapse.
+
+    Son comandos que el usuario dejó correr: etiqueta benigna. Los marcados entran todos (son los falsos
+    positivos que el ajuste debe corregir); del resto, una muestra estable por hash de `sample` comandos.
+    """
+    flagged: dict[str, bool] = {}
+    for path in sorted(Path.home().glob(".claude*/**/logs/synapse/*.jsonl")):
+        commands: dict[str, str] = {}
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("hook") != "block_dangerous":
+                    continue
+                if row.get("step") == "input":
+                    if "claude-plugin-synapse" not in str(row.get("cwd", "")):
+                        commands[row["run"]] = str(row.get("command", ""))
+                elif row.get("step") == "laya" and row.get("run") in commands and row.get("result") in ("ok", "flagged"):
+                    cmd = commands[row["run"]]
+                    flagged[cmd] = flagged.get(cmd, False) or row["result"] == "flagged"
+    marked = [(c, True) for c, f in flagged.items() if f]
+    rest = sorted((c for c, f in flagged.items() if not f), key=lambda c: hashlib.sha256(c.encode()).hexdigest())
+    return marked + [(c, False) for c in rest[:sample]]
+
+
 def build_dataset() -> None:
     rows = []
     real = json.load(open(EVAL_DIR / "real_commands.json"))
@@ -52,6 +85,11 @@ def build_dataset() -> None:
         if "claude-plugin-synapse" in r["project"]:
             continue
         rows.append({"command": r["command"], "label": 0, "source": "real", "split": _bucket(r["command"])})
+    seen = {r["command"] for r in rows}
+    for command, was_flagged in trace_commands():
+        if command not in seen:
+            seen.add(command)
+            rows.append({"command": command, "label": 0, "source": "trace:flagged" if was_flagged else "trace", "split": _bucket(command)})
     for split, name in (("fit", "train"), ("eval", "test")):
         for line in open(EVAL_DIR / "shellrisk" / f"{name}.jsonl"):
             r = json.loads(line)
@@ -202,11 +240,14 @@ def auroc(pos: list[float], neg: list[float]) -> float:
 def summarize(rows: list[dict], flagged: dict[int, bool], split: str = "eval") -> dict:
     sub = [r for r in rows if r["split"] == split]
     real = [r for r in sub if r["source"] == "real" and not r["regex"]]
+    trace = [r for r in sub if r["source"].startswith("trace") and not r["regex"]]
     risky = [r for r in sub if r["source"].startswith("shellrisk") and r["label"]]
     benign_sr = [r for r in sub if r["source"].startswith("shellrisk") and not r["label"] and not r["regex"]]
     rate = lambda rs: sum(flagged[r["id"]] for r in rs) / max(1, len(rs))  # noqa: E731
     return {
         "fpr_real": round(rate(real), 4),
+        "fpr_trace": round(rate(trace), 4),
+        "n_trace": len(trace),
         "fpr_shellrisk": round(rate(benign_sr), 4),
         "recall_laya": round(rate(risky), 4),
         "recall_pipeline": round(sum(flagged[r["id"]] or r["regex"] for r in risky) / max(1, len(risky)), 4),
@@ -269,8 +310,8 @@ def platt_scores(rows, names, w):
 
 
 def threshold_for_fpr(scores, rows, max_fpr: float) -> float:
-    """Umbral mínimo cuyo FPR sobre comandos reales (fit) no supera max_fpr."""
-    real = sorted((s for s, r in zip(scores, rows) if r["source"] == "real"), reverse=True)
+    """Umbral mínimo cuyo FPR sobre comandos reales y de la traza (fit) no supera max_fpr."""
+    real = sorted((s for s, r in zip(scores, rows) if r["source"] == "real" or r["source"].startswith("trace")), reverse=True)
     k = int(max_fpr * len(real))
     return float(real[k]) + 1e-9 if k < len(real) else 0.0
 
@@ -309,7 +350,7 @@ def export(ft_variant: str, zs_variant: str, delta_path: str, max_fpr: float) ->
             "variant": variant,
             "weights": res["weights"],
             "threshold": res["threshold"],
-            "eval": {k: res[k] for k in ("auroc", "fpr_real", "fpr_shellrisk", "recall_laya", "recall_pipeline", "n_real", "n_risky")},
+            "eval": {k: res[k] for k in ("auroc", "fpr_real", "fpr_trace", "fpr_shellrisk", "recall_laya", "recall_pipeline", "n_real", "n_trace", "n_risky")},
         }
     profiles["finetuned"]["delta"] = delta_name
     policy = {
