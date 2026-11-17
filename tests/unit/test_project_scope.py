@@ -45,7 +45,7 @@ def decide(command: str, cwd: Path, project: Path | None, monkeypatch) -> str:
     """Solo la capa determinista: con --laya gpu el modelo puede sumar un 'ask' legítimo."""
     import block_dangerous
 
-    monkeypatch.setattr(block_dangerous, "should_use_laya", lambda: False)
+    monkeypatch.setattr(block_dangerous, "should_use_laya", lambda hook=None: False)
     if project is None:
         monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     else:
@@ -84,22 +84,43 @@ CASES = [
     pytest.param("rm -f link_out", ".", ".", "ask", id="rm_de_symlink_borra_solo_el_enlace"),
     pytest.param("touch link_out/x", ".", ".", "block", id="escribir_a_traves_de_symlink"),
     pytest.param("rm -rf {out}/x", ".", None, "block", id="sin_claude_project_dir_usa_cwd"),
-    # .git: cualquier comando que la involucre pide confirmación (salvo los bloqueos deterministas)
-    pytest.param("cat .git/HEAD", ".", ".", "ask", id="git_dir_lectura"),
-    pytest.param("ls .git", ".", ".", "ask", id="git_dir_listado"),
+    # .git: cualquier comando que la modifique pide confirmación (salvo los bloqueos deterministas); leerla no
+    pytest.param("cat .git/HEAD", ".", ".", "pass", id="git_dir_lectura"),
+    pytest.param("ls .git", ".", ".", "pass", id="git_dir_listado"),
+    pytest.param("test -f .git/MERGE_HEAD && echo merge", ".", ".", "pass", id="git_dir_test_merge_head"),
+    pytest.param("cp .git/config tmp/config.bak", ".", ".", "ask", id="git_dir_copia_conservadora"),
+    pytest.param("cp tmp/x .git/config", ".", ".", "ask", id="git_dir_copia_hacia_git"),
+    pytest.param("chmod +x .git/hooks/pre-commit", ".", ".", "ask", id="git_dir_chmod"),
     pytest.param("rm -rf .git", ".", ".", "ask", id="git_dir_borrado"),
     pytest.param('d=.git; rm -rf "$d"', ".", ".", "ask", id="git_dir_por_variable"),
-    pytest.param("cd client && cat ../.git/config", ".", ".", "ask", id="git_dir_relativo"),
+    pytest.param("cd client && cat ../.git/config", ".", ".", "pass", id="git_dir_relativo"),
+    pytest.param("cd client && rm -f ../.git/index.lock", ".", ".", "ask", id="git_dir_relativo_borrado"),
     pytest.param("echo x > .git/HEAD", ".", ".", "block", id="git_dir_echo_sigue_bloqueado"),
     pytest.param("rg -n x --glob '!.git' .", ".", ".", "pass", id="exclusion_de_git_no_cuenta"),
     pytest.param("rsync -a --exclude .git client/ tmp/copia", ".", ".", "pass", id="rsync_exclude_git"),
     pytest.param("touch .gitignore .github/x.yml", ".", ".", "pass", id="gitignore_no_es_git_dir"),
     pytest.param("jq -c '.git' tmp/report.json", ".", ".", "pass", id="filtro_jq_no_es_git_dir"),
     pytest.param("rg -n '.git' src", ".", ".", "pass", id="patron_rg_no_es_git_dir"),
-    pytest.param("jq -r .x .git/config", ".", ".", "ask", id="jq_sobre_git_dir"),
-    pytest.param("grep -e x .git/config", ".", ".", "ask", id="grep_e_sobre_git_dir"),
-    pytest.param("jq -f .git/filtro.jq tmp/x.json", ".", ".", "ask", id="jq_f_desde_git_dir"),
+    pytest.param("jq -r .x .git/config", ".", ".", "pass", id="jq_sobre_git_dir"),
+    pytest.param("grep -e x .git/config", ".", ".", "pass", id="grep_e_sobre_git_dir"),
+    pytest.param("jq -f .git/filtro.jq tmp/x.json", ".", ".", "pass", id="jq_f_desde_git_dir"),
+    pytest.param("sed -i s/a/b/ .git/config", ".", ".", "block", id="sed_i_sobre_git_dir_sigue_bloqueado"),
+    # Carpeta hermana <repo>-worktrees: convención para worktrees fuera del repo
+    pytest.param("mkdir -p {repo}-worktrees/x && touch {repo}-worktrees/x/a", ".", ".", "pass", id="hermana_worktrees_escritura"),
+    pytest.param("touch {repo}-worktrees/x/a", ".claude/worktrees/wt", ".claude/worktrees/wt", "pass", id="hermana_worktrees_desde_worktree"),
+    pytest.param("touch {repo}-otros/a", ".", ".", "block", id="otra_hermana_sigue_fuera"),
 ]
+
+
+def test_claude_memory_dir_is_part_of_the_project(repo, monkeypatch) -> None:
+    config = GIT_REPOS_DIR / "claude-config"  # fuera de cualquier segmento tmp/: si no, todo sería desechable
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    memory = common.claude_memory_dir(str(repo), str(config))
+    assert memory.endswith("-scope/memory") and "/projects/-" in memory
+    assert decide(f"touch {memory}/nota.md", repo, repo, monkeypatch) == "pass"
+    assert decide(f"rm -f {memory}/nota.md", repo, repo, monkeypatch) == "ask"
+    other = common.claude_memory_dir("/otro/proyecto", str(config))
+    assert decide(f"touch {other}/nota.md", repo, repo, monkeypatch) == "block"
 
 
 def _expand(text: str, repo: Path) -> str:

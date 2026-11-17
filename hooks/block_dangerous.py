@@ -51,6 +51,7 @@ import math
 import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,7 @@ from common import (
     HARMLESS_DEVICES,
     REDIRECT_GLUED_RE,
     REDIRECT_OP_RE,
+    SCRATCHPAD_RE,
     TMP_SEGMENT_RE,
     ShellVars,
     allowed_roots,
@@ -76,6 +78,7 @@ from common import (
     is_git_recoverable,
     is_outside_project,
     is_system_tmp,
+    laya_skip_reason,
     log_step,
     parse_command_targets,
     read_hook_input,
@@ -152,9 +155,47 @@ ASK_PATTERNS = [
     r"\bdocker\b.*\s(-v|--volume)[=\s]+/:",
     r"\bdocker\b.*\s--pid[=\s]+host\b",
     r"\bdocker\b.*docker\.sock\b",
+    r"--unix-socket[=\s]+\S*docker\.sock\b",  # API de Docker directa (las consultas GET se eximen)
     # Servidor HTTP que expone el home o la raíz del sistema a la red
     r"\bhttp\.server\b.*\s(-d|--directory)[=\s]+(~|\$HOME|/home/[^/\s]+|/root|/)/?(\s|$)",
 ]
+
+# Sub-comandos que solo buscan o listan: `rg "DROP DATABASE" devtools` o `test -S /var/run/docker.sock` no
+# ejecutan nada de lo que mencionan. echo/printf/cat NO están: su salida puede ir a psql por un pipe.
+ASK_EXEMPT_CMDS = {
+    "rg", "grep", "egrep", "fgrep", "ag", "ls", "eza", "exa", "tree", "test", "[", "[[", "stat", "file",
+    "which", "type", "du", "readlink", "realpath", "jq", "yq",
+}
+DOCKER_API_READ_RE = re.compile(r"^(https?://[^/\s]*)?/(v[\d.]+/)?(_ping|info|version|containers/json|images/json|system/df)\b")
+CURL_WRITE_FLAGS_RE = re.compile(r"^(-X|--request|-d|--data.*|-F|--form|-T|--upload-file|--json)(=|$)|^-[a-zA-Z]*[XdFT]")
+
+
+def is_docker_api_read(subcmd: str) -> bool:
+    """curl --unix-socket docker.sock con GET a un endpoint de consulta (/_ping, /info, /version, /containers/json)."""
+    cmd, _ = parse_command_targets(subcmd)
+    if cmd != "curl" or "docker.sock" not in subcmd:
+        return False
+    try:
+        tokens = shlex.split(subcmd, posix=True)
+    except ValueError:
+        return False
+    if any(CURL_WRITE_FLAGS_RE.match(t) for t in tokens):
+        return False
+    urls = [t for t in tokens if t.startswith(("http://", "https://"))]
+    return bool(urls) and all(DOCKER_API_READ_RE.match(u) for u in urls)
+
+
+def ask_pattern_hit(command: str) -> str | None:
+    """Primer patrón de ASK_PATTERNS presente en algún sub-comando que no sea de búsqueda o listado."""
+    for sc in extract_bash_tokens(command):
+        cmd, _ = parse_command_targets(sc)
+        if cmd in ASK_EXEMPT_CMDS or is_docker_api_read(sc):
+            continue
+        for pat in ASK_PATTERNS:
+            if re.search(pat, sc):
+                return pat
+    return None
+
 
 DESTRUCTIVE_CMDS = {"rm", "unlink", "rmdir", "shred"}
 
@@ -445,6 +486,187 @@ def is_lockfile_sync(command: str, cwd: str | None = None, roots: tuple[str, ...
     return found
 
 
+# ---------------------------------------------------------------- comandos de desarrollo rutinarios
+# Aprendidos de la traza real (klinikae, oct-nov 2026): ~20 mil consultas a Laya, 24 'ask' y los 24 falsos
+# positivos (bun run typecheck, git worktree list, pdfinfo, timeout N tail -f /dev/null...). Si un comando
+# solo combina estos sub-comandos con lecturas, Laya no aporta: se decide aquí ('pass', nunca 'allow').
+
+PROJECT_COMMANDS_CONFIG = os.path.join(".claude", "synapse-commands.json")
+PACKAGE_RUNNERS = {"bun", "npm", "pnpm", "yarn"}
+RUNNER_VALUE_FLAGS = {"--cwd", "-C", "--prefix", "--dir", "--filter", "-F", "--workspace", "-w"}
+UV_VALUE_FLAGS = {"--directory", "--project", "--package", "-p", "--python", "--group", "--extra", "--env-file"}
+DEV_TOOLS = {
+    "pytest", "mypy", "ruff", "black", "isort", "pyright", "coverage", "tsc", "eslint", "prettier", "vitest",
+    "jest", "biome", "pdfinfo",
+}
+SCRIPT_RUNNERS = {"bun", "node", "python", "python3", "deno", "tsx"}
+GIT_ROUTINE_SUBCMDS = GIT_READ_SUBCMDS | {
+    "add", "commit", "fetch", "pull", "push", "switch", "branch", "tag", "stash", "worktree", "merge-base",
+}
+GIT_WORKTREE_ROUTINE = {"list", "add", "prune"}
+# None = cualquier acción salvo las excluidas; gh api/auth y gh repo delete quedan fuera
+GH_ROUTINE: dict[str, set[str] | None] = {"pr": None, "run": None, "issue": None, "repo": {"view"}, "release": {"view", "list"}}
+GH_EXCLUDED = {("pr", "merge")}
+GRAPHIFY_ROUTINE = {"query", "explain", "path", "update"}
+
+
+def _strip_wrappers(tokens: list[str]) -> list[str]:
+    """Quita asignaciones (VAR=x), `timeout N`, `time` y `nice` del inicio del sub-comando."""
+    while tokens:
+        if ASSIGN_RE.match(tokens[0]):
+            tokens = tokens[1:]
+        elif tokens[0] == "timeout":
+            tokens = tokens[1:]
+            while tokens and tokens[0].startswith("-"):
+                tokens = tokens[1:]
+            if tokens and re.fullmatch(r"\d+(\.\d+)?[smhd]?", tokens[0]):
+                tokens = tokens[1:]
+        elif tokens[0] in {"time", "nice"}:
+            tokens = tokens[1:]
+        else:
+            break
+    return tokens
+
+
+def _skip_flags(tokens: list[str], value_flags: set[str]) -> list[str]:
+    """Saltea flags (y sus valores) hasta el primer posicional."""
+    rest = list(tokens)
+    while rest and rest[0].startswith("-"):
+        rest = rest[2:] if rest[0] in value_flags else rest[1:]
+    return rest
+
+
+def _is_tracked_script(path: str, cwd: str | None, roots: tuple[str, ...]) -> bool:
+    """Script versionado del proyecto (git ls-files): su contenido se revisa en el repo, no en el comando."""
+    if not cwd or not roots or not re.search(r"\.(ts|js|mjs|cjs|py|tsx)$", path):
+        return False
+    resolved = os.path.normpath(os.path.join(cwd, path))
+    if is_outside_project(resolved, "/", roots) or TMP_SEGMENT_RE.search(os.path.relpath(resolved, cwd)):
+        return False
+    try:
+        proc = subprocess.run(
+            ["git", "-C", os.path.dirname(resolved), "ls-files", "--error-unmatch", os.path.basename(resolved)],
+            capture_output=True, timeout=2,
+        )
+    except Exception:
+        return False
+    return proc.returncode == 0
+
+
+def project_routine_prefixes(cwd: str | None) -> list[list[str]]:
+    """`routine_commands` de $CLAUDE_PROJECT_DIR (o cwd)/.claude/synapse-commands.json, como listas de tokens.
+
+    Ejemplo: {"routine_commands": ["bun devtools/run.ts", "graphify"]}. Archivo ausente o inválido -> [].
+    """
+    root = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
+    if not root:
+        return []
+    try:
+        with open(os.path.join(root, PROJECT_COMMANDS_CONFIG), encoding="utf-8") as fh:
+            values = json.load(fh).get("routine_commands")
+    except (OSError, ValueError, AttributeError):
+        return []
+    prefixes: list[list[str]] = []
+    for value in values if isinstance(values, list) else []:
+        try:
+            tokens = shlex.split(value) if isinstance(value, str) else []
+        except ValueError:
+            continue
+        if tokens:
+            prefixes.append(tokens)
+    return prefixes
+
+
+def is_dev_subcommand(tokens: list[str], cwd: str | None, roots: tuple[str, ...], prefixes: list[list[str]]) -> bool:
+    """Un sub-comando de desarrollo rutinario (tokens ya sin redirecciones)."""
+    tokens = _strip_wrappers(tokens)
+    if not tokens:
+        return False
+    if any(tokens[: len(p)] == p for p in prefixes):
+        return True
+    head, rest = tokens[0], tokens[1:]
+    if head in DEV_TOOLS:
+        return True
+    if head in PACKAGE_RUNNERS:
+        positional = _skip_flags(rest, RUNNER_VALUE_FLAGS)
+        if positional and positional[0] in {"run", "test", "typecheck", "lint"}:
+            return True
+    if head == "uv" and rest[:1] == ["run"]:
+        positional = _skip_flags(rest[1:], UV_VALUE_FLAGS)
+        if "--with" in rest or not positional:
+            return False
+        if positional[0] in DEV_TOOLS:
+            return True
+        if positional[0] in {"python", "python3"} and positional[1:2] == ["-m"] and positional[2:3] and positional[2] in DEV_TOOLS:
+            return True
+        return bool(positional[0] in SCRIPT_RUNNERS and positional[1:] and _is_tracked_script(positional[1], cwd, roots))
+    if head in {"python", "python3"} and rest[:1] == ["-m"] and rest[1:2] and rest[1] in DEV_TOOLS:
+        return True
+    if head in LOCKFILE_SUBCMDS and _is_lockfile_subcommand(tokens, cwd, roots):
+        return True
+    if head in SCRIPT_RUNNERS:
+        positional = _skip_flags(rest, set())
+        return bool(positional) and _is_tracked_script(positional[0], cwd, roots)
+    if head == "git":
+        sub = _git_subcommand(tokens)
+        if sub == "worktree":
+            idx = tokens.index("worktree")
+            return tokens[idx + 1: idx + 2] != [] and tokens[idx + 1] in GIT_WORKTREE_ROUTINE
+        return sub in GIT_ROUTINE_SUBCMDS
+    if head == "gh":
+        if not rest or rest[0] not in GH_ROUTINE:
+            return False
+        actions = GH_ROUTINE[rest[0]]
+        action = rest[1] if len(rest) > 1 else ""
+        return (rest[0], action) not in GH_EXCLUDED and (actions is None or action in actions)
+    if head == "graphify":
+        return bool(rest) and rest[0] in GRAPHIFY_ROUTINE
+    if head == "mkdir":
+        return _reads_inside(rest, cwd, roots)
+    return False
+
+
+def is_dev_routine(command: str, cwd: str | None = None, roots: tuple[str, ...] = ()) -> bool:
+    """True si cada sub-comando es de desarrollo rutinario o de solo lectura (con `cd` dentro del proyecto).
+
+    Excluye sustituciones $(...), heredocs y lecturas de secretos (los ve Laya, si está encendida).
+    Las redirecciones deben ir a ./tmp/, al scratchpad, a un *.log o a /dev/null.
+    """
+    if SUBSHELL_RE.search(command) or split_heredocs(command)[1] or SECRET_PATH_RE.search(command):
+        return False
+    prefixes = project_routine_prefixes(cwd)
+    eff_cwd = cwd
+    variables: ShellVars = {}
+    found = False
+    for sc in extract_bash_tokens(command):
+        if track_variables(sc, variables, eff_cwd):
+            continue
+        targets = [t for t in redirect_targets(sc) if not t.startswith(HARMLESS_DEVICES)]
+        if not all(_is_disposable_write(t) for t in targets):
+            return False
+        try:
+            tokens = _without_redirects(shlex.split(sc, posix=True))
+        except ValueError:
+            return False
+        if tokens and tokens[0].startswith("("):
+            tokens[0] = tokens[0].lstrip("(")
+        tokens = [t for t in tokens if t not in {")", "("}]
+        if tokens and tokens[-1].endswith(")"):
+            tokens[-1] = tokens[-1].rstrip(")")
+        if tokens and tokens[0] == "cd":
+            dest = resolve_candidates(tokens[1] if len(tokens) > 1 else "~", variables, eff_cwd)
+            eff_cwd = dest[0] if dest and len(dest) == 1 else None
+            if eff_cwd is None or is_outside_project(eff_cwd, "/", roots):
+                return False
+            continue
+        if is_dev_subcommand(tokens, eff_cwd, roots, prefixes):
+            found = True
+            continue
+        if not is_read_only(sc, eff_cwd, roots):
+            return False
+    return found
+
+
 HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
 SHELL_OP_RE = re.compile(r"[();<>|&]+")
 NEEDS_QUOTE_RE = re.compile(r"[\s();<>|&'\"]")
@@ -572,28 +794,63 @@ SHELL_EXPANSION_RE = re.compile(r"\$(\?|\{[^}]*\}|\w+|\([^)]*\))")
 
 
 def _is_status_echo(args: list[str], targets: list[str]) -> bool:
-    """`echo "exit=$?" >> log`, `echo $SID > tmp/sid`: el contenido es una expansión, no texto redactado."""
+    """`echo "exit=$?" >> log`, `echo $SID > tmp/sid`: el contenido es una expansión, no texto redactado.
+
+    Con `$?` (código de salida) se acepta una etiqueta de hasta 80 caracteres en una línea:
+    `echo "server lint+typecheck+unit exit=$?" >> tmp/final.txt`.
+    """
     text = " ".join(a for a in args if a not in targets)
-    return bool(SHELL_EXPANSION_RE.search(text)) and len(SHELL_EXPANSION_RE.sub("", text).strip()) <= 20
+    if not SHELL_EXPANSION_RE.search(text):
+        return False
+    literal = SHELL_EXPANSION_RE.sub("", text).strip()
+    return len(literal) <= 20 or ("$?" in text and "\n" not in text and len(literal) <= 80)
+
+
+DISPOSABLE_WRITE_EXTS = (".log",)
+
+
+def _is_disposable_write(target: str) -> bool:
+    """Destino desechable para texto redactado: ./tmp/ del proyecto, scratchpad /tmp/claude-* o un *.log.
+
+    /tmp del sistema no cuenta (lo controla structure.system_tmp). Sin resolver ($(cmd), $1) tampoco.
+    """
+    if "$" in target or (target.startswith("/tmp/") and not SCRATCHPAD_RE.match(target)):
+        return False
+    return bool(TMP_SEGMENT_RE.search(target) or SCRATCHPAD_RE.match(target) or target.endswith(DISPOSABLE_WRITE_EXTS))
+
+
+def _all_disposable(targets: list[str], variables: ShellVars) -> bool:
+    for t in targets:
+        values = expand_word(t, variables, None) if "$" in t else [t]
+        if not values or not all(_is_disposable_write(v) for v in values):
+            return False
+    return bool(targets)
 
 
 def agent_authored_write(command: str) -> str | None:
     """Motivo de bloqueo si el comando escribe un archivo con contenido redactado por el agente.
 
     La salida de herramientas (pytest > tmp/out.log, npm test | tee log, git, builds) no cuenta:
-    ese contenido lo decide el programa, no el agente.
+    ese contenido lo decide el programa, no el agente. Tampoco cuenta el texto redactado cuyo destino es
+    desechable (./tmp/, scratchpad de la sesión, *.log): no es código del proyecto ni queda en un diff.
     """
     kept, bodies = split_heredocs(command, keep_terminators=True)
     shell = "\n".join(kept)
+    variables: ShellVars = {}
     for sc in extract_bash_tokens(shell):
+        if track_variables(sc, variables, None):
+            continue
         cmd, paths = parse_command_targets(sc)
         targets = [t for t in redirect_targets(sc) if not t.startswith(HARMLESS_DEVICES)]
-        if cmd in {"echo", "printf"} and targets and not _is_status_echo(paths, targets):
+        if cmd in {"echo", "printf"} and targets and not _is_status_echo(paths, targets) and not _all_disposable(targets, variables):
             return f"'{cmd}' redirigido a {', '.join(targets)}. {WRITE_TOOL_HINT}"
         if "<<" in sc and (cmd in {"cat", "tee"} and (targets or (cmd == "tee" and paths))):
-            return f"heredoc escrito con '{cmd}' en {', '.join(targets or paths)}. {WRITE_TOOL_HINT}"
+            if not _all_disposable(targets or paths, variables):
+                return f"heredoc escrito con '{cmd}' en {', '.join(targets or paths)}. {WRITE_TOOL_HINT}"
         if cmd in {"sed", "perl", "ruby", "awk", "gawk"} and INPLACE_FLAG_RE.search(sc):
-            return f"edición in-place con '{cmd}'. {EDIT_TOOL_HINT}"
+            edited = [t for t in write_targets(sc) if t != (paths[0] if paths else None)] if cmd in INPLACE_EDITORS else []
+            if not _all_disposable(edited, variables):
+                return f"edición in-place con '{cmd}'. {EDIT_TOOL_HINT}"
     if any(CODE_WRITE_RE.search(code) for line in kept for code in _inline_code(line)):
         return f"script inline (-c / -e) que escribe archivos. {EDIT_TOOL_HINT}"
     if ECHO_TEE_RE.search(shell):
@@ -684,6 +941,7 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
     destructive_targets: list[str] = []
     recoverable_targets: list[str] = []
     git_refs: list[str] = []
+    system_tmp_redirects: list[str] = []
     all_targets_disposable = True
     all_targets_safe = True  # desechables o recuperables con git checkout
     has_destructive_cmd = False
@@ -691,7 +949,9 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
         if track_variables(sc, variables, eff_cwd):
             continue
         cmd, paths = parse_command_targets(sc)
-        git_refs += git_dir_refs(sc, variables, eff_cwd)
+        # Leer .git (cat .git, ls .git/worktrees, test -f .git/MERGE_HEAD) no cambia el historial
+        if not is_read_only(sc, eff_cwd or cwd, roots):
+            git_refs += git_dir_refs(sc, variables, eff_cwd)
         if cmd == "cd":
             if sc.split()[1:2] == ["-"]:  # vuelve al directorio anterior (OLDPWD); desconocido al inicio
                 eff_cwd, prev_cwd = prev_cwd, eff_cwd
@@ -702,6 +962,7 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
             if eff_cwd and is_outside_project(eff_cwd, "/", roots):
                 log_step("structure.cd_outside", target=eff_cwd, roots=roots)
             continue
+        redirects = redirect_targets(sc)
         for t in write_targets(sc):
             candidates = resolve_candidates(t, variables, eff_cwd)
             if candidates is None:
@@ -710,6 +971,12 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
             # `rm link` borra el enlace, no su destino; `rm link/` y las escrituras sí lo siguen
             follow = not (cmd in DESTRUCTIVE_CMDS and not t.endswith("/"))
             for resolved in candidates:
+                if is_system_tmp(resolved, "/") and t in redirects:
+                    # Salida de un programa redirigida a /tmp del sistema: no destruye nada, pero queda fuera del
+                    # proyecto. Se confirma (después de los bloqueos) en vez de bloquear.
+                    log_step("structure.system_tmp_redirect", result="match", subcmd=sc, target=resolved)
+                    system_tmp_redirects.append(resolved)
+                    continue
                 if is_system_tmp(resolved, "/"):
                     log_step("structure.system_tmp", result="match", subcmd=sc, target=resolved)
                     _block(f"El comando '{cmd}' apunta a /tmp del sistema operativo ({resolved}). Usa ./tmp/ dentro del proyecto.",
@@ -759,11 +1026,17 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
         _decide("ask", f"El comando involucra la carpeta .git del repositorio ({', '.join(git_refs)}). Se requiere confirmación explícita.",
                 command, "structure.git_dir", evidence={"refs": git_refs})
 
+    # 2d. Salida redirigida a /tmp del sistema: confirmación (el scratchpad /tmp/claude-* sigue permitido)
+    if system_tmp_redirects:
+        _decide("ask", f"La salida se redirige a /tmp del sistema ({', '.join(system_tmp_redirects)}). Usa ./tmp/ del proyecto "
+                "o el scratchpad de la sesión; confirma si es intencional.", command, "structure.system_tmp_redirect",
+                evidence={"targets": system_tmp_redirects})
+
     # 3. Confirmaciones deterministas, antes del auto-allow (un 'allow' salta el sistema de permisos de Claude Code)
-    for pat in ASK_PATTERNS:
-        if re.search(pat, command):
-            log_step("regex.ask", result="match", pattern=pat)
-            _decide("ask", f"Operación difícil de revertir (patrón: {pat}). Se requiere confirmación explícita.", command, "regex.ask", evidence={"pattern": pat})
+    pat = ask_pattern_hit(command)
+    if pat:
+        log_step("regex.ask", result="match", pattern=pat)
+        _decide("ask", f"Operación difícil de revertir (patrón: {pat}). Se requiere confirmación explícita.", command, "regex.ask", evidence={"pattern": pat})
     log_step("regex.ask", result="no_match", checked=len(ASK_PATTERNS))
 
     # 4. Borrado exclusivamente de temporales desechables: aprobado sin preguntar
@@ -796,8 +1069,10 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
         log_step("laya", result="skipped", reason="solo lectura (determinista)")
     elif is_lockfile_sync(command, cwd, roots):
         log_step("laya", result="skipped", reason="sincronización de lockfile (determinista)")
-    elif not should_use_laya():
-        log_step("laya", result="skipped", reason="modo fallback")
+    elif is_dev_routine(command, cwd, roots):
+        log_step("laya", result="skipped", reason="desarrollo rutinario (determinista)")
+    elif not should_use_laya("block_dangerous"):
+        log_step("laya", result="skipped", reason=laya_skip_reason("block_dangerous"))
     else:
         try:
             started = datetime.now()

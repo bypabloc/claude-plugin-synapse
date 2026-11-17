@@ -44,6 +44,8 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=8)
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--pos-weight", type=float, default=3.0)
+    ap.add_argument("--flagged-repeat", type=int, default=1,
+                    help="Repeticiones de los falsos positivos de la traza (source trace:flagged): son pocos y se diluyen")
     ap.add_argument("--out", default=str(ev.EVAL_DIR / "ft_delta.pt"))
     args = ap.parse_args()
 
@@ -62,6 +64,7 @@ def main() -> None:
     options = list(qdef["criteria"])  # orden de los marcadores = orden de los criterios
     build = ev.INPUTS[args.input]
     rows = [r for r in ev.load_dataset() if r["split"] == "fit" and not r["regex"]]
+    rows += [r for r in rows if r["source"] == "trace:flagged"] * (args.flagged_repeat - 1)
     examples = []
     for r in rows:
         item = agent._encode_state(build(r["command"])[:4000], [qid], internal)[0]

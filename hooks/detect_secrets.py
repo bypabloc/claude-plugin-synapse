@@ -55,6 +55,7 @@ from common import (
     read_hook_input,
     record_audit_log,
     run_main,
+    laya_skip_reason,
     should_use_laya,
 )
 
@@ -217,7 +218,9 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write", cwd: s
     log_step("candidates", count=len(candidates))
     if not candidates:
         log_step("laya", result="skipped", reason="sin literales candidatos (determinista)")
-    elif should_use_laya():
+    elif not should_use_laya("detect_secrets"):
+        log_step("laya", result="skipped", reason=laya_skip_reason("detect_secrets"))
+    else:
         try:
             router = get_laya_router()
             res = router.predict("\n".join(candidates)[:LAYA_MAX_SECRET_CHARS], SECRET_QUESTIONS)

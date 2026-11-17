@@ -323,7 +323,7 @@
     "expected_decision": "ask"
   },
   {
-    "name": "ask_git_dir_read_cat",
+    "name": "pass_git_dir_read_cat",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -332,10 +332,10 @@
       "cwd": "{project}"
     },
     "expected_exit": 0,
-    "expected_decision": "ask"
+    "expected_decision": null
   },
   {
-    "name": "ask_git_dir_read_sed",
+    "name": "pass_git_dir_read_sed",
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
@@ -344,7 +344,7 @@
       "cwd": "{project}"
     },
     "expected_exit": 0,
-    "expected_decision": "ask"
+    "expected_decision": null
   },
   {
     "name": "ask_git_dir_cp_out",
@@ -836,10 +836,110 @@
     "expected_in_stderr": "Usa la tool Write"
   },
   {
-    "name": "block_bash_write_echo_scratchpad",
+    "name": "pass_bash_write_echo_scratchpad",
     "payload": {"tool_name": "Bash", "tool_input": {"command": "echo x > /tmp/claude-1000/abc/out.txt"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
+    "name": "pass_bash_write_printf_sql_tmp",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "mkdir -p tmp/q && printf \"SELECT id FROM users;\\n\" > tmp/q/su.sql"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
+    "name": "pass_bash_write_heredoc_scratchpad_variable",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "S=/tmp/claude-1000/abc/scratchpad; cat > $S/pr.md <<'EOF'\n## Riesgo\nBajo\nEOF"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
+    "name": "pass_bash_write_status_echo_in_subshell",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "(bun install --cwd server/admin-ui > tmp-admin-ui-install.log 2>&1; echo \"ADMIN_UI_INSTALL_EXIT=$?\" >> tmp-admin-ui-install.log)"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
+    "name": "block_bash_write_sed_i_tmp_and_src",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i 's/a/b/' tmp/x.txt src/app.py"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Edit"
+  },
+  {
+    "name": "pass_bash_write_sed_i_tmp_only",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i 's/a/b/' tmp/controlled-pdf/check.py"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
+    "name": "block_bash_write_heredoc_unresolved_variable",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "D=$(mktemp -d); cat > $D/x.py <<'EOF'\nx = 1\nEOF"}, "cwd": "{project}"},
     "expected_exit": 2,
     "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "block_bash_write_echo_system_tmp",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "echo hola mundo desde el agente > /tmp/notas.txt"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Write"
+  },
+  {
+    "name": "ask_tool_output_to_system_tmp",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "bun devtools/run.ts bench --help >/tmp/x 2>/dev/null; echo \"exit=$?\""}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "block_rm_in_system_tmp_still_blocked",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "rm -f /tmp/notas.txt"}, "cwd": "{project}"},
+    "expected_exit": 2
+  },
+  {
+    "name": "pass_rg_pattern_mentions_drop_database",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "rg -n \"DROP DATABASE|CREATE DATABASE|TEMPLATE\" devtools | head -n 30"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
+    "name": "ask_echo_drop_piped_to_psql",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "echo \"DROP TABLE users\" | psql -d app"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_drop_database_in_psql",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "docker exec db sh -c 'psql -U \"$POSTGRES_USER\" -d postgres -c \"DROP DATABASE IF EXISTS app_check\"'"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_drop_in_heredoc_body",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "psql -d app <<'SQL'\nDROP TABLE users;\nSQL"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "pass_docker_socket_ping",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "test -S /var/run/docker.sock && echo present; curl -s -m 5 --unix-socket /var/run/docker.sock -o /dev/null -w '%{http_code}' http://localhost/_ping"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
+    "name": "ask_docker_socket_post",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "curl -s --unix-socket /var/run/docker.sock -X POST http://localhost/containers/create"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_docker_privileged_still_asks",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "docker run --privileged --rm tonistiigi/binfmt --install arm64"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "block_timeout_wrapper_destructive_outside",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "timeout 30 rm -rf /etc/app"}, "cwd": "{project}"},
+    "expected_exit": 2
   },
   {
     "name": "block_bash_write_cat_heredoc",
