@@ -966,6 +966,18 @@
     "expected_in_stderr": "Usa la tool Edit"
   },
   {
+    "name": "block_bash_write_sed_script_is_not_a_path",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i '/^#/d' src/app.py"}, "cwd": "{project}"},
+    "expected_exit": 2,
+    "expected_in_stderr": "Usa la tool Edit"
+  },
+  {
+    "name": "pass_bash_write_sed_absolute_script_tmp_only",
+    "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i -e '/^#/d' -e '/x/d' tmp/check.py"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
     "name": "block_bash_write_perl_inplace",
     "payload": {"tool_name": "Bash", "tool_input": {"command": "perl -pi -e 's/a/b/' src/app.py"}, "cwd": "{project}"},
     "expected_exit": 2,
