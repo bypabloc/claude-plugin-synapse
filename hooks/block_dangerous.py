@@ -205,12 +205,36 @@ INPLACE_EDITORS = {"sed", "perl"}  # solo con -i
 DEST_ONLY_CMDS = {"cp", "rsync", "install", "ln"}
 
 
+INPLACE_PROGRAM_FLAG_RE = re.compile(r"^(-[a-zA-Z]*[ef]|--(expression|file))$")
+
+
+def _inplace_files(subcmd: str, paths: list[str]) -> list[str]:
+    """Archivos que edita `sed -i`/`perl -i`, sin el script: `sed -i '25s/a/b/' f` solo edita f.
+
+    El script es el primer posicional o el valor de -e/-f; no es una ruta que se escriba.
+    """
+    try:
+        tokens = shlex.split(subcmd, posix=True)
+    except ValueError:
+        return paths
+    programs = [tokens[i + 1] for i, t in enumerate(tokens[:-1]) if INPLACE_PROGRAM_FLAG_RE.match(t)]
+    if not programs:
+        return paths[1:]
+    files = list(paths)
+    for prog in programs:
+        if prog in files:
+            files.remove(prog)
+    return files
+
+
 def write_targets(subcmd: str) -> list[str]:
     """Rutas que un sub-comando modifica: redirecciones de salida + argumentos de comandos de escritura."""
     targets = redirect_targets(subcmd)
     cmd, paths = parse_command_targets(subcmd)
-    if cmd in MUTATING_CMDS or (cmd in INPLACE_EDITORS and re.search(r"\s-[a-zA-Z]*i", subcmd)):
+    if cmd in MUTATING_CMDS:
         targets += paths
+    elif cmd in INPLACE_EDITORS and re.search(r"\s-[a-zA-Z]*i", subcmd):
+        targets += _inplace_files(subcmd, paths)
     elif cmd in DEST_ONLY_CMDS and paths:
         targets.append(paths[-1])
     elif cmd == "dd":
@@ -743,8 +767,7 @@ def command_evidence(command: str) -> str:
         if cmd in DESTRUCTIVE_CMDS:
             effects += [f"deletes {p}" for p in paths]
         else:
-            expr = paths[0] if cmd == "sed" and paths else None
-            effects += [f"writes {t}" for t in write_targets(sc) if t != expr]
+            effects += [f"writes {t}" for t in write_targets(sc)]
         if cmd in NETWORK_CMDS:
             effects.append(f"network access ({cmd})")
         if cmd in {"sudo", "doas"} or re.match(r"(sudo|doas)\s", sc):
@@ -848,7 +871,7 @@ def agent_authored_write(command: str) -> str | None:
             if not _all_disposable(targets or paths, variables):
                 return f"heredoc escrito con '{cmd}' en {', '.join(targets or paths)}. {WRITE_TOOL_HINT}"
         if cmd in {"sed", "perl", "ruby", "awk", "gawk"} and INPLACE_FLAG_RE.search(sc):
-            edited = [t for t in write_targets(sc) if t != (paths[0] if paths else None)] if cmd in INPLACE_EDITORS else []
+            edited = write_targets(sc) if cmd in INPLACE_EDITORS else []
             if not _all_disposable(edited, variables):
                 return f"edición in-place con '{cmd}'. {EDIT_TOOL_HINT}"
     if any(CODE_WRITE_RE.search(code) for line in kept for code in _inline_code(line)):
