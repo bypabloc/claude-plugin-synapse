@@ -62,6 +62,7 @@ from common import (
     record_audit_log,
     resolve_path,
     run_main,
+    laya_skip_reason,
     should_use_laya,
 )
 
@@ -216,7 +217,9 @@ def evaluate_bash_env_read(command: str, cwd: str) -> None:
         sys.exit(0)
 
     # 2. Evaluación semántica con Laya System 1, solo para lo que el código no resuelve
-    if should_use_laya():
+    if not should_use_laya("block_env_read"):
+        log_step("laya", result="skipped", reason=laya_skip_reason("block_env_read"))
+    else:
         try:
             router = get_laya_router()
             res = router.predict(command, ENV_INTENT_QUESTIONS)

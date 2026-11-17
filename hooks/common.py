@@ -17,8 +17,8 @@ Ejemplos de Uso:
   True
   >>> infer_format("postgres://user:pass@host:5432/db")
   'URL, 33 caracteres'
-  >>> should_use_laya()
-  True  # si Laya está instalado y no se especificó --fallback
+  >>> should_use_laya("block_dangerous")
+  False  # Laya está apagada por defecto: se enciende con SYNAPSE_LAYA=on o SYNAPSE_LAYA_HOOKS
 """
 
 from __future__ import annotations
@@ -82,19 +82,61 @@ ASK_PATTERNS = (
     ".claude/settings.local.json",
     ".claude/hooks/",
     ".vscode/settings.json",
+    # Configuración de Synapse por proyecto: el agente no debe ampliar su propia lista blanca sin aprobación
+    ".claude/synapse-commands.json",
+    ".claude/synapse-secrets.json",
 )
 
 
-def should_use_laya() -> bool:
+LAYA_HOOKS = ("block_dangerous", "block_env_read", "detect_secrets", "protect_files")
+_SWITCH_ON = {"1", "on", "true", "yes"}
+_SWITCH_OFF = {"0", "off", "false", "no"}
+
+
+def laya_switch(hook: str | None) -> tuple[bool, str]:
+    """(activa, motivo) según SYNAPSE_LAYA y SYNAPSE_LAYA_HOOKS. Laya está apagada por defecto.
+
+      - SYNAPSE_LAYA=off: apagada en todos los hooks, sin importar SYNAPSE_LAYA_HOOKS.
+      - SYNAPSE_LAYA=on: encendida en los hooks de SYNAPSE_LAYA_HOOKS, o en todos si esa lista está vacía.
+      - SYNAPSE_LAYA sin definir (o con otro valor): encendida solo en los hooks de SYNAPSE_LAYA_HOOKS.
+    SYNAPSE_LAYA_HOOKS es una lista separada por comas (block_dangerous,detect_secrets).
+    """
+    master = os.environ.get("SYNAPSE_LAYA", "").strip().lower()
+    hooks = {h.strip() for h in os.environ.get("SYNAPSE_LAYA_HOOKS", "").split(",") if h.strip()}
+    if master in _SWITCH_OFF:
+        return False, "SYNAPSE_LAYA=off"
+    if master in _SWITCH_ON:
+        if not hooks or hook in hooks:
+            return True, "SYNAPSE_LAYA=on"
+        return False, f"hook fuera de SYNAPSE_LAYA_HOOKS ({','.join(sorted(hooks))})"
+    if hook is not None and hook in hooks:
+        return True, "hook en SYNAPSE_LAYA_HOOKS"
+    return False, "Laya apagada por defecto (SYNAPSE_LAYA no está en on)"
+
+
+def should_use_laya(hook: str | None = None) -> bool:
     """Determina si se consulta a Laya System 1 o se opera solo con las reglas deterministas.
 
     Reglas:
       - Laya o torch no instalados: False (fallback determinista).
       - Flag --fallback: False.
+      - Switch apagado para el hook (laya_switch; por defecto Laya está apagada): False.
       - En otro caso True: el daemon decide el dispositivo. Sin GPU (y sin --cpu) responde con error y el
         hook sigue solo con las reglas deterministas, igual que el fallback.
+    Sin hook explícito se usa el de la ejecución en curso (read_hook_input).
     """
-    return _LAYA_AVAILABLE and "--fallback" not in sys.argv
+    if not _LAYA_AVAILABLE or "--fallback" in sys.argv:
+        return False
+    return laya_switch(hook if hook is not None else _TRACE.get("hook"))[0]
+
+
+def laya_skip_reason(hook: str | None = None) -> str:
+    """Motivo legible para la traza cuando Laya no se consulta."""
+    if not _LAYA_AVAILABLE:
+        return "Laya o torch no instalados"
+    if "--fallback" in sys.argv:
+        return "flag --fallback"
+    return laya_switch(hook if hook is not None else _TRACE.get("hook"))[1]
 
 
 def laya_mode() -> str:
@@ -670,11 +712,14 @@ def parse_command_targets(subcmd: str) -> tuple[str, list[str]]:
     # Palabras clave (`do rm x`, `then rm x`), asignaciones de entorno (VAR=x cmd) y envoltorios (sudo rm ...)
     # no son el comando real: sin esto, `for f in *; do rm -rf "$f"; done` no se analizaba
     while tokens and (re.match(r"^[A-Za-z_]\w*=", tokens[0]) or tokens[0] in COMMAND_WRAPPERS or tokens[0] in SHELL_KEYWORDS):
+        wrapper = tokens[0]
         tokens = tokens[1:]
         while tokens and tokens[0].startswith("-"):  # flags del envoltorio (sudo -E, nice -n 5)
             tokens = tokens[1:]
             if tokens and tokens[0].isdigit():
                 tokens = tokens[1:]
+        if wrapper == "timeout" and tokens and DURATION_RE.fullmatch(tokens[0]):  # timeout 300 cmd
+            tokens = tokens[1:]
     if not tokens:
         return "", []
     cmd = os.path.basename(tokens[0])
@@ -693,8 +738,9 @@ def parse_command_targets(subcmd: str) -> tuple[str, list[str]]:
     return cmd, paths
 
 
-COMMAND_WRAPPERS = {"sudo", "doas", "nohup", "time", "command", "exec", "nice", "ionice", "env"}
+COMMAND_WRAPPERS = {"sudo", "doas", "nohup", "time", "command", "exec", "nice", "ionice", "env", "timeout"}
 SHELL_KEYWORDS = {"do", "then", "else", "elif", "if", "while", "until", "!", "{"}
+DURATION_RE = re.compile(r"\d+(\.\d+)?[smhd]?")
 REDIRECT_OP_RE = re.compile(r"(\d|&)?>{1,2}\|?")
 REDIRECT_GLUED_RE = re.compile(r"^(\d|&)?>{1,2}\|?(.+)$")
 HARMLESS_DEVICES = ("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin", "/dev/tty", "/dev/fd/")
@@ -733,17 +779,34 @@ def allowed_roots(cwd: str) -> tuple[str, ...]:
     Del ancla se toman su toplevel git, el superproyecto (si es un submódulo) y todos los worktrees del repo,
     así una sesión en client/ puede trabajar en la raíz y una sesión en un worktree puede escribir en el
     repo principal. Un repo de dotfiles en ~ (o en /) nunca amplía el alcance: se vuelve al ancla.
+
+    También cuentan como proyecto:
+      - La carpeta hermana `<repo>-worktrees` del worktree principal (convención para worktrees fuera del
+        repo: `git worktree add ../<repo>-worktrees/<rama>`).
+      - La memoria de Claude Code del proyecto: `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<ruta-con-guiones>/memory`.
     """
-    return _roots_for(os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR") or cwd))
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    return _roots_for(os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR") or cwd), os.path.realpath(config_dir))
+
+
+def claude_memory_dir(project_dir: str, config_dir: str) -> str:
+    """Carpeta de memoria que Claude Code usa para un proyecto (la ruta con todo lo no alfanumérico como '-')."""
+    return os.path.join(config_dir, "projects", re.sub(r"[^A-Za-z0-9]", "-", project_dir), "memory")
 
 
 @functools.lru_cache(maxsize=8)
-def _roots_for(anchor: str) -> tuple[str, ...]:
+def _roots_for(anchor: str, config_dir: str) -> tuple[str, ...]:
     candidates = _git_lines(anchor, "rev-parse", "--show-toplevel", "--show-superproject-working-tree")
-    candidates += [line[len("worktree "):] for line in _git_lines(anchor, "worktree", "list", "--porcelain") if line.startswith("worktree ")]
+    worktrees = [line[len("worktree "):] for line in _git_lines(anchor, "worktree", "list", "--porcelain") if line.startswith("worktree ")]
+    candidates += worktrees
     too_wide = {os.path.realpath(str(Path.home())), os.sep}
     roots = [r for r in dict.fromkeys(os.path.realpath(c) for c in candidates if c) if r not in too_wide]
-    return tuple(roots) or (anchor,)
+    if not roots:
+        return (anchor,)
+    main = os.path.realpath(worktrees[0]) if worktrees else roots[0]  # el primero del porcelain es el principal
+    extra = [os.path.join(os.path.dirname(main), os.path.basename(main) + "-worktrees")]
+    extra += [claude_memory_dir(p, config_dir) for p in dict.fromkeys([anchor, *roots])]
+    return tuple(dict.fromkeys(roots + [e for e in extra if e not in too_wide]))
 
 
 allowed_roots.cache_clear = _roots_for.cache_clear  # type: ignore[attr-defined]
