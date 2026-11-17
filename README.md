@@ -67,10 +67,10 @@ Todos los scripts residen en `hooks/` y se rigen por la especificación oficial 
 
 | Script | Evento | Herramientas | Política y Comportamiento |
 | :--- | :--- | :--- | :--- |
-| [`block_dangerous.py`](hooks/block_dangerous.py) | `PreToolUse` | `Bash` | **Auto-Allow:** Operaciones sobre `./tmp/`, `/tmp/claude-*`, `dist/`, `.cache/`.<br>**Block (exit 2):** `rm -rf /`, `git push --force`, fork bombs, `/dev/sd*`, escrituras fuera del entorno git del proyecto (con variables resueltas: `p=/home/x; rm -rf "$p"`), y escribir archivos desde Bash (`echo >`, `cat <<EOF >`, `sed -i`, scripts inline que escriben): usar `Write`/`Edit`.<br>**Ask (exit 0):** Cualquier comando que involucre la carpeta `.git`, eliminación permanente de código fuente o archivos base, y comandos que Laya afinado marca como riesgosos (FPR 0.36% en comandos reales, ver `models/laya-block-dangerous.json`). |
+| [`block_dangerous.py`](hooks/block_dangerous.py) | `PreToolUse` | `Bash` | **Auto-Allow:** Operaciones sobre `./tmp/`, `/tmp/claude-*`, `dist/`, `.cache/`.<br>**Block (exit 2):** `rm -rf /`, `git push --force`, fork bombs, `/dev/sd*`, escrituras fuera del entorno git del proyecto (con variables resueltas: `p=/home/x; rm -rf "$p"`), y escribir archivos desde Bash (`echo >`, `cat <<EOF >`, `sed -i`, scripts inline que escriben): usar `Write`/`Edit`.<br>**Ask (exit 0):** Cualquier comando que modifique la carpeta `.git` (leerla no), salida redirigida a `/tmp` del sistema, eliminación permanente de código fuente o archivos base, y, con Laya encendida, comandos que Laya afinado marca como riesgosos (ver `models/laya-block-dangerous.json`).<br>**Pass sin Laya:** lecturas, `git`/`gh` rutinarios, `bun|npm|pnpm run|test`, `uv run <herramienta>`, scripts versionados del proyecto y los prefijos de `.claude/synapse-commands.json`. |
 | [`block_env_read.py`](hooks/block_env_read.py) | `PreToolUse` | `Read`, `Bash` | **Allow:** Plantillas `.env.example`, `.env.sample`, comandos `source .env`.<br>**Block (exit 2):** Lectura con `Read` o comandos `cat`, `head`, `tail`, `awk`, `strings`, `python`, `node`. Devuelve esquema ofuscado. |
 | [`detect_secrets.py`](hooks/detect_secrets.py) | `PreToolUse` | `Edit`, `Write` | **Allow:** Placeholders (`your-api-key`, `REPLACE_ME`, `process.env`, `os.getenv`).<br>**Block (exit 2):** Llaves privadas RSA/SSH, OpenAI, Anthropic, Google, AWS, Stripe, GitHub, contraseñas en texto plano y tokens detectados por Laya.<br>**Excepción por proyecto:** `.claude/synapse-secrets.json` (en `$CLAUDE_PROJECT_DIR`, o el `cwd` del payload) con `{"password_rule_values": ["required"]}` deja pasar la firma de contraseña solo si el valor capturado coincide exactamente (sensible a mayúsculas) con un elemento. Cualquier literal igual pasa en ese proyecto, aunque fuera una credencial real. Archivo ausente o inválido: bloquea. |
-| [`protect_files.py`](hooks/protect_files.py) | `PreToolUse` | `Edit`, `Write` | **Allow:** Código fuente general, plantillas `.dist`/`.template`.<br>**Block (exit 2):** Modificación manual de `.git/`, `.venv/` o lockfiles de dependencias.<br>**Ask (exit 0):** Ajustes de configuración de agentes (`.claude/settings.json`). |
+| [`protect_files.py`](hooks/protect_files.py) | `PreToolUse` | `Edit`, `Write` | **Allow:** Código fuente general, plantillas `.dist`/`.template`.<br>**Block (exit 2):** Modificación manual de `.git/`, `.venv/` o lockfiles de dependencias.<br>**Ask (exit 0):** Ajustes de configuración de agentes (`.claude/settings.json`) y de Synapse (`.claude/synapse-*.json`). |
 
 ---
 
@@ -142,12 +142,43 @@ python3 scripts/synapse_log.py --follow             # en vivo
 
 | Variable | Descripción | Valor por Defecto |
 | :--- | :--- | :--- |
+| `SYNAPSE_LAYA` | Switch global de Laya. `on` la enciende en todos los hooks (o solo en los de `SYNAPSE_LAYA_HOOKS`); `off` la apaga en todos y pesa sobre cualquier otra variable. Sin definir, Laya corre solo en los hooks de `SYNAPSE_LAYA_HOOKS`. | Sin definir: **Laya apagada**, solo reglas deterministas |
+| `SYNAPSE_LAYA_HOOKS` | Hooks donde corre Laya, separados por comas (`block_dangerous,detect_secrets,protect_files,block_env_read`). | Vacía |
 | `SYNAPSE_LOG_DIR` | Reemplaza el directorio de la traza JSONL (`AAAA-MM-DD.jsonl`). Ideal para testing. | `${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/` |
 | `SYNAPSE_DEBUG` | Activa mensajes informativos de diagnóstico y aceleración de hardware en `stderr` (`1` para activar). | Desactivado (`0`) para evitar ruido en terminal |
 | `SYNAPSE_LOG_RETENTION_DAYS` | Días que se conservan las trazas diarias; las más antiguas se borran al crear la del día (`0` = conservar todo). | `30` |
 | `SYNAPSE_LAYA_IDLE_SECONDS` | Segundos sin uso tras los que el daemon de Laya termina y libera la VRAM. | `1200` |
 | `SYNAPSE_LAYA_STARTUP_SECONDS` | Espera máxima del hook a que el daemon arranque; si se agota, ese hook sigue solo con reglas deterministas. | `40` |
 | `SYNAPSE_RUNTIME_DIR` | Carpeta del socket y del log del daemon. | `$XDG_RUNTIME_DIR` o `~/.cache` (+ `/synapse`) |
+
+### Encender o apagar Laya
+
+Laya viene **apagada por defecto**: en la traza real de un proyecto (oct-nov 2026) se consultó ~20 mil veces en
+`block_dangerous`, costó ~205 ms por comando (contra ~8 ms del código) y sus 24 confirmaciones fueron falsos
+positivos; todo lo peligroso lo detuvieron las reglas deterministas. Se enciende desde el `env` de
+`settings.json`, global (`~/.claude/settings.json`) o por proyecto (`.claude/settings.json`):
+
+```jsonc
+{ "env": { "SYNAPSE_LAYA": "on" } }                              // todos los hooks
+{ "env": { "SYNAPSE_LAYA_HOOKS": "block_dangerous" } }           // solo ese hook
+{ "env": { "SYNAPSE_LAYA": "off" } }                             // apagada aunque haya lista
+```
+
+### Comandos rutinarios por proyecto (`.claude/synapse-commands.json`)
+
+Los sub-comandos que empiezan con alguno de estos prefijos se tratan como desarrollo rutinario: Laya no los
+evalúa (decisión `pass`; Claude Code aplica sus permisos normales). Las reglas de bloqueo y confirmación
+siguen aplicando antes. Editar el archivo pide confirmación (`protect_files`).
+
+```json
+{ "routine_commands": ["bun devtools/run.ts", "graphify"] }
+```
+
+Para proponer la lista a partir de la traza de un proyecto:
+
+```bash
+python3 scripts/learn_from_log.py --project ~/projects/x --replay   # resumen, replay y sugerencias
+```
 
 ---
 

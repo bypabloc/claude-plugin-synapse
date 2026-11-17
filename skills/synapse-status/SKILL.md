@@ -11,6 +11,7 @@ Cuando el usuario invoque este skill o solicite verificar el estado de Synapse:
 1. **Verificar Estado de Hardware e Inferencia**:
    - Comprobar si CUDA/GPU está disponible mediante Python.
    - Indicar si el motor opera en modo GPU (~25ms), CPU (~700ms) o Fallback determinístico (<1ms).
+   - Laya está apagada por defecto: reportar `SYNAPSE_LAYA` y `SYNAPSE_LAYA_HOOKS` (`on`/`off` y la lista de hooks donde corre). Sin ninguna, todos los hooks operan solo con reglas deterministas.
 
 2. **Verificar la Traza de Auditoría**:
    - Ejecutar `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/synapse_log.py" --since 1h` (traza en `${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/AAAA-MM-DD.jsonl`).
