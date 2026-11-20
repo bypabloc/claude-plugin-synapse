@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/dispatch.py\" --host codex",
+            "commandWindows": "& \"$env:PLUGIN_ROOT\\hooks\\run-hook.cmd\" dispatch --host codex",
+            "timeout": 30,
+            "statusMessage": "Synapse"
+          }
+        ]
+      }
+    ]
+  }
+}

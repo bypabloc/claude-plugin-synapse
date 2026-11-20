@@ -1,0 +1,15 @@
+{
+  "name": "synapse",
+  "version": "1.6.1",
+  "description": "Guardrails de seguridad antes de cada tool: comandos destructivos, escrituras fuera del proyecto, lectura de .env, secretos y archivos protegidos (reglas deterministas + Laya System 1).",
+  "keywords": ["security", "guardrails", "hooks", "secrets-detection"],
+  "skills": "./skills/",
+  "hooks": "./adapters/codex/hooks.json",
+  "interface": {
+    "displayName": "Synapse",
+    "shortDescription": "Guardrails de seguridad para el agente",
+    "developerName": "Pablo Contreras",
+    "category": "Security",
+    "websiteURL": "https://github.com/bypabloc/agent-plugin-synapse"
+  }
+}

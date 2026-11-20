@@ -1,0 +1,14 @@
+{
+  "synapse": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "^(run_command|read_file|write_file|edit_file|view_file|write_to_file|replace_file_content|multi_replace_file_content)$",
+        "hooks": [
+          { "type": "command", "command": "hooks/run-hook.cmd dispatch --host antigravity", "timeout": 30 },
+          { "type": "command", "command": "hooks\\run-hook.cmd dispatch --host antigravity", "timeout": 30 }
+        ]
+      }
+    ]
+  }
+}

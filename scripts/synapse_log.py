@@ -162,7 +162,13 @@ def main() -> None:
     parser.add_argument("--decision", choices=["allow", "ask", "block", "pass"])
     parser.add_argument("--json", action="store_true", help="JSONL crudo (para jq)")
     parser.add_argument("--follow", "-f", action="store_true", help="seguir el log de hoy en vivo")
+    parser.add_argument("--host", choices=["claude", "codex", "antigravity", "opencode"], default="claude",
+                        help="claude lee ${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse; los demás, la traza compartida de "
+                             "Codex, Antigravity y OpenCode (<estado de Synapse>/logs; cada 'input' trae su host)")
     args = parser.parse_args()
+    import hosts  # noqa: PLC0415
+
+    hosts.set_context(args.host, None)
     color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
     if args.follow:
         follow(args, color)

@@ -1,6 +1,9 @@
 {
   "files": [
     { "path": ".claude-plugin/plugin.json", "key": "version" },
+    { "path": ".codex-plugin/plugin.json", "key": "version" },
+    { "path": ".antigravity-plugin/plugin.json", "key": "version" },
+    { "path": "package.json", "key": "version" },
     { "path": "marketplace-entry.json", "key": "version" },
     { "path": "pyproject.toml", "regex": "(?m)^version = \"([^\"]+)\"" }
   ]

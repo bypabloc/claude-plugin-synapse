@@ -17,4 +17,5 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Temporales y caché dentro de ./tmp del proyecto
-addopts = "--basetemp=tmp/pytest -p no:cacheprovider"
+addopts = "--basetemp=tmp/pytest -p no:cacheprovider -m 'not e2e_hosts'"
+markers = ["e2e_hosts: E2E con los binarios reales de Codex, Antigravity y OpenCode (costo de modelo); -m e2e_hosts"]

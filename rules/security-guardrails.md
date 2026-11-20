@@ -1,3 +1,8 @@
+---
+trigger: always_on
+description: Política de guardrails de Synapse (temporales, borrados, secretos y archivos protegidos)
+---
+
 # Synapse Security Guardrails & Policy Guidelines
 
 <!-- ====================================================================== -->

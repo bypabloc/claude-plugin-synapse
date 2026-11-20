@@ -1,0 +1,12 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "synapse",
+  "displayName": "Synapse",
+  "description": "Guardrails de seguridad antes de cada tool: comandos destructivos, escrituras fuera del proyecto, lectura de .env, secretos y archivos protegidos (reglas deterministas + Laya System 1).",
+  "version": "1.6.1",
+  "author": { "name": "Pablo Contreras", "url": "https://github.com/bypabloc" },
+  "homepage": "https://github.com/bypabloc/agent-plugin-synapse",
+  "repository": "https://github.com/bypabloc/agent-plugin-synapse",
+  "license": "MIT",
+  "keywords": ["security", "guardrails", "hooks"]
+}
