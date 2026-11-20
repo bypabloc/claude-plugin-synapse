@@ -18,6 +18,29 @@ if str(HOOKS_DIR) not in sys.path:
 
 LAYA_FLAGS = {"off": "--fallback", "cpu": "--cpu", "gpu": "--gpu"}
 
+# Windows nativo: estos tests asumen POSIX (rutas /tmp y /home, sockets Unix del daemon de Laya, el pipeline de
+# hooks por sh, salidas golden con '/'). Corren y se informan como xfail, no se ocultan; la cobertura completa de
+# Windows (rutas y PowerShell) es el spec 002 (issue #3). Lo que sí debe funcionar en Windows queda fuera de la lista.
+WINDOWS_POSIX_ONLY = (
+    "tests/unit/test_golden_claude.py",
+    "tests/unit/test_project_scope.py",
+    "tests/unit/test_laya_daemon.py",
+    "tests/e2e/test_plugin_hooks.py",
+    "tests/unit/test_block_dangerous.py::test_case",
+    "tests/unit/test_hosts.py::test_equivalence",
+    "tests/unit/test_deterministic_gate.py::test_recoverable",
+    "tests/unit/test_attribution.py::test_log_viewer",
+)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if os.name != "nt":
+        return
+    mark = pytest.mark.xfail(reason="asume POSIX; Windows completo en el spec 002 (#3)", strict=False)
+    for item in items:
+        if any(item.nodeid.replace("\\", "/").startswith(prefix) for prefix in WINDOWS_POSIX_ONLY):
+            item.add_marker(mark)
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(

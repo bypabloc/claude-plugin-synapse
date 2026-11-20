@@ -105,6 +105,9 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
     norm_path = resolve_path(file_path, cwd)
     p = Path(norm_path)
     file_name = p.name
+    # Los patrones usan '/': en Windows la ruta resuelta trae '\' y ningún patrón coincidía (Synapse dejaba pasar
+    # .claude/settings.json o .codex/config.toml sin preguntar)
+    match_path = norm_path.replace("\\", "/")
 
     # 0. El estado de Synapse (aprobaciones de un solo uso) no lo escribe el agente (spec 001 · R-02)
     state = os.path.realpath(str(state_dir()))
@@ -125,7 +128,7 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
     log_step("paths", resolved=norm_path, in_protected_dir=in_protected_dir, template=is_editable_template)
     decision = {"hook_name": "protect_files", "tool_name": tool_name, "target": file_path}
     # 3. Bloqueo determinístico para patrones protegidos críticos
-    protected = next((pat for pat in PROTECTED_PATTERNS if pat in norm_path or pat == file_name), None)
+    protected = next((pat for pat in PROTECTED_PATTERNS if pat in match_path or pat == file_name), None)
     if in_protected_dir or protected:
         emit_block(
             f"No se puede modificar un archivo o directorio protegido (lockfile, .env, .git/, .venv/, node_modules/): {file_path}",
@@ -133,13 +136,13 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
         )
 
     # 4. Solicitud de confirmación determinística para configuraciones de Claude
-    config = next((pat for pat in ASK_PATTERNS if pat in norm_path), None)
+    config = next((pat for pat in ASK_PATTERNS if pat in match_path), None)
     if config:
         emit_decision("ask", f"Configuración de agentes o del IDE: requiere aprobación explícita ({file_path})",
                       decided_by="python", rule="path.agent_config", evidence={"pattern": config}, **decision)
 
     # 5. Archivos de credenciales por nombre o extensión (claves, keystores, tfstate, .npmrc...)
-    if CREDENTIAL_FILE_RE.search(norm_path):
+    if CREDENTIAL_FILE_RE.search(match_path):
         log_step("credential_file", result="match")
         emit_decision("ask", f"El archivo parece guardar credenciales (clave, keystore o configuración con tokens): {file_path}",
                       decided_by="python", rule="path.credential_file", **decision)
