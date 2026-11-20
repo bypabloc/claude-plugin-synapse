@@ -13,6 +13,9 @@ from support import GIT_REPOS_DIR, HOOKS_DIR
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
+# --basetemp=tmp/pytest (pyproject) necesita tmp/, que no viene en un clon nuevo (está en .gitignore)
+(HOOKS_DIR.parent / "tmp").mkdir(exist_ok=True)
+
 LAYA_FLAGS = {"off": "--fallback", "cpu": "--cpu", "gpu": "--gpu"}
 
 
