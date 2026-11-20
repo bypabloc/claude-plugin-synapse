@@ -48,7 +48,7 @@ class HookResult:
 
 def _expand(value, project: str):
     if isinstance(value, str):
-        value = value.replace("{project}", project).replace("{gitroot}", GIT_ROOT)
+        value = value.replace("{project}", project).replace("{gitroot}", GIT_ROOT).replace("{home}", str(Path.home()))
         for key, real in PLACEHOLDERS.items():
             value = value.replace(key, real)
         return value

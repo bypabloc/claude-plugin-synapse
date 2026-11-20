@@ -594,7 +594,7 @@
     "payload": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "cd /home/bypabloc && rm -rf projects/x"
+        "command": "cd {home} && rm -rf projects/x"
       },
       "cwd": "{project}"
     },
