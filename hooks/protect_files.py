@@ -47,6 +47,8 @@ from pathlib import Path
 # Agregar directorio actual a sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import hosts  # noqa: E402
+
 from common import (
     ASK_PATTERNS,
     PROTECTED_PATTERNS,
@@ -61,6 +63,7 @@ from common import (
     run_main,
     laya_skip_reason,
     should_use_laya,
+    state_dir,
 )
 
 FILE_SENSITIVITY_QUESTIONS = {
@@ -102,6 +105,13 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
     norm_path = resolve_path(file_path, cwd)
     p = Path(norm_path)
     file_name = p.name
+
+    # 0. El estado de Synapse (aprobaciones de un solo uso) no lo escribe el agente (spec 001 · R-02)
+    state = os.path.realpath(str(state_dir()))
+    if os.path.realpath(norm_path) == state or os.path.realpath(norm_path).startswith(state + os.sep):
+        emit_block(f"No se puede escribir en el estado de Synapse ({state}): las aprobaciones las da el usuario.",
+                   hook_name="protect_files", tool_name=tool_name, target=file_path, decided_by="python",
+                   rule="path.synapse_state")
 
     # 1. Comprobar si es un directorio protegido
     in_protected_dir = any(part in {".git", "node_modules", ".venv"} for part in p.parts)
@@ -162,19 +172,25 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
     sys.exit(0)
 
 
+def evaluate(event: hosts.HookEvent) -> None:
+    """Cada ruta escrita (también el destino de un '*** Move to:'). Un archivo protegido rechaza el patch entero."""
+    if event.kind != "write":
+        return
+    cwd = event.cwd or os.getcwd()
+    for change in event.files:
+        for path in [change.path] + ([change.move_to] if change.move_to else []):
+            try:
+                evaluate_target_path(path, cwd, event.tool)
+            except SystemExit as exc:  # 'sin objeciones' sale con 0: se sigue con la próxima ruta
+                if exc.code not in (0, None) or len(event.files) == 1 and not change.move_to:
+                    raise
+
+
 def main() -> None:
     data = read_hook_input("protect_files")
     if not data:
         sys.exit(0)
-
-    tool_name = data.get("tool_name", "")
-    if tool_name not in {"Edit", "Write"}:
-        sys.exit(0)
-
-    file_path = data.get("tool_input", {}).get("file_path", "")
-    cwd = data.get("cwd") or os.getcwd()
-
-    evaluate_target_path(file_path, cwd, tool_name)
+    evaluate(hosts.normalize("claude", data))
 
 
 if __name__ == "__main__":

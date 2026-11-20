@@ -59,6 +59,8 @@ from typing import Any
 # Agregar directorio actual a sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import hosts  # noqa: E402
+
 from datetime import datetime
 
 from common import (
@@ -81,6 +83,7 @@ from common import (
     laya_skip_reason,
     log_step,
     parse_command_targets,
+    project_config_path,
     read_hook_input,
     record_audit_log,
     redirect_targets,
@@ -241,7 +244,108 @@ def write_targets(subcmd: str) -> list[str]:
         targets += [p[3:] for p in paths if p.startswith("of=")]
     elif cmd == "find" and paths and re.search(r"\s-(delete|exec\s+(rm|shred|mv|truncate))\b", subcmd):
         targets.append(paths[0])
+    elif cmd == "git":
+        targets += git_write_targets(subcmd)
     return targets
+
+
+# Subcomandos de git que escriben en el repo donde corren (spec 001 · R-04)
+GIT_WRITING_SUBCMDS = {
+    "config", "remote", "commit", "checkout", "switch", "reset", "merge", "rebase", "pull", "fetch", "worktree",
+    "init", "apply", "am", "stash", "add", "rm", "mv", "restore", "clean", "tag", "branch", "cherry-pick", "revert",
+    "submodule", "gc", "prune", "update-ref", "update-index", "notes",
+}
+
+
+def git_write_targets(subcmd: str) -> list[str]:
+    """Directorios que un git escribe: destino de clone/init y -C / --git-dir / --work-tree con un subcomando que
+    escribe. Brecha del 2026-11-20: `git clone url ../x` y `git -C ../x remote set-url` no se bloqueaban."""
+    try:
+        tokens = shlex.split(subcmd)
+    except ValueError:
+        return []
+    if not tokens or os.path.basename(tokens[0]) != "git":
+        return []
+    dirs: list[str] = []
+    i = 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "-C" and i + 1 < len(tokens):
+            dirs.append(tokens[i + 1])
+            i += 2
+        elif tok in {"-c", "--namespace", "--exec-path"} and i + 1 < len(tokens):
+            i += 2
+        elif tok.startswith(("--git-dir=", "--work-tree=")):
+            dirs.append(tok.split("=", 1)[1])
+            i += 1
+        elif tok in {"--git-dir", "--work-tree"} and i + 1 < len(tokens):
+            dirs.append(tokens[i + 1])
+            i += 2
+        elif tok.startswith("-"):
+            i += 1
+        else:
+            break
+    if i >= len(tokens):
+        return []
+    sub, rest = tokens[i], [t for t in tokens[i + 1 :] if not t.startswith("-")]
+    targets = dirs if sub in GIT_WRITING_SUBCMDS else []
+    if sub == "clone" and len(rest) >= 2:
+        targets.append(rest[1])
+    elif sub == "init" and rest:
+        targets.append(rest[0])
+    return targets
+
+
+# ---------------------------------------------------------------- reglas multi-agente (spec 001 · R-01, R-05, T-28)
+
+# El usuario aprueba los 'ask' de Codex con scripts/synapse.py approve <id>; el agente nunca (R-01)
+SELF_APPROVAL_RE = re.compile(r"synapse(\.py)?[\"']?\s+approve\b|[/\\]approvals[/\\](pending|approved|consumed)\b")
+# Otro agente lanzado sin los guardrails del host actual (R-05)
+AGENT_WRAPPERS = {
+    "codex": {"exec", "e"},
+    "claude": {"-p", "--print"},
+    "opencode": {"run"},
+    "agy": {"-p", "--print", "--prompt"},
+    "gemini": {"-p", "--prompt"},
+}
+UNSAFE_AGENT_FLAGS_RE = re.compile(r"--dangerously-[\w-]+|--yolo\b|--full-auto\b")
+# Windows (PowerShell / cmd): mínimo determinista; la cobertura completa es el spec 002 (T-28)
+WINDOWS_DISK_RE = re.compile(r"(?i)\b(Format-Volume|Clear-Disk|diskpart)\b|(^|[;&|]\s*)format\s+[a-z]:")
+WINDOWS_REMOTE_FETCH_RE = re.compile(r"(?i)\b(iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString|DownloadFile)\b")
+WINDOWS_EVAL_RE = re.compile(r"(?i)\b(iex|Invoke-Expression)\b")
+WINDOWS_DESTRUCTIVE_RE = re.compile(
+    r"(?i)\b(Remove-Item|ri)\b[^;|&\n]*?\s-(Recurse|Force)\b|(^|[;&|]\s*)(rd|rmdir|del|erase)\s+[^;|&\n]*?/[sq]\b"
+)
+
+
+def agent_wrapper(command: str) -> tuple[str, str] | None:
+    """('block' | 'ask', detalle) si el comando lanza otro agente en modo no interactivo."""
+    for sc in extract_bash_tokens(command):
+        try:
+            tokens = shlex.split(sc)
+        except ValueError:
+            continue
+        if not tokens:
+            continue
+        name = os.path.basename(tokens[0]).removesuffix(".exe").removesuffix(".cmd")
+        modes = AGENT_WRAPPERS.get(name)
+        if modes and any(t in modes for t in tokens[1:3]):
+            if UNSAFE_AGENT_FLAGS_RE.search(sc):
+                return "block", f"'{name}' sin sus protecciones ({UNSAFE_AGENT_FLAGS_RE.search(sc).group(0)})"
+            return "ask", f"'{name}' en modo no interactivo: ese agente corre sin los guardrails de esta sesión"
+    return None
+
+
+def windows_rule(command: str) -> tuple[str, str, str] | None:
+    """(verdict, regla, motivo) para patrones de PowerShell/cmd peligrosos."""
+    if WINDOWS_DISK_RE.search(command):
+        return "block", "windows.disk", "Operación de disco destructiva en Windows (formatear o limpiar un volumen)."
+    if WINDOWS_EVAL_RE.search(command) and WINDOWS_REMOTE_FETCH_RE.search(command):
+        return "block", "windows.remote_exec", "Ejecución de un script descargado (iex con Invoke-WebRequest/irm)."
+    match = WINDOWS_DESTRUCTIVE_RE.search(command)
+    if match and not TMP_SEGMENT_RE.search(match.group(0).replace("\\", "/")):
+        return "ask", "windows.destructive", "Borrado recursivo o forzado en Windows fuera de ./tmp/: se requiere confirmación explícita."
+    return None
 
 
 def touches_git_dir(path: str) -> bool:
@@ -582,11 +686,11 @@ def project_routine_prefixes(cwd: str | None) -> list[list[str]]:
 
     Ejemplo: {"routine_commands": ["bun devtools/run.ts", "graphify"]}. Archivo ausente o inválido -> [].
     """
-    root = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
-    if not root:
+    path = project_config_path("commands", cwd or "")
+    if not path:
         return []
     try:
-        with open(os.path.join(root, PROJECT_COMMANDS_CONFIG), encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             values = json.load(fh).get("routine_commands")
     except (OSError, ValueError, AttributeError):
         return []
@@ -955,6 +1059,18 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
                    command, "regex.catastrophic", {"pattern": pat})
     log_step("regex.catastrophic", result="no_match", checked=len(CATASTROPHIC_PATTERNS))
 
+    # 1b. Reglas multi-agente deterministas: auto-aprobación, otro agente sin guardrails, PowerShell/cmd
+    if SELF_APPROVAL_RE.search(command):
+        _block("El agente no puede aprobar sus propias confirmaciones de Synapse: la aprobación la ejecuta el usuario "
+               f"en su terminal.\nComando recibido: {command}", command, "structure.self_approval")
+    wrapper = agent_wrapper(command)
+    if wrapper and wrapper[0] == "block":
+        _block(f"Lanzar otro agente sin sus protecciones no está permitido: {wrapper[1]}.\nComando recibido: {command}",
+               command, "structure.agent_wrapper_unsafe")
+    windows = windows_rule(command)
+    if windows and windows[0] == "block":
+        _block(f"{windows[2]}\nComando recibido: {command}", command, windows[1])
+
     # 2. Análisis estructural por sub-comando, con variables resueltas: fuera del entorno git del proyecto,
     #    /tmp del sistema, carpeta .git y objetivos de borrado
     roots = allowed_roots(cwd)
@@ -1055,6 +1171,13 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
                 "o el scratchpad de la sesión; confirma si es intencional.", command, "structure.system_tmp_redirect",
                 evidence={"targets": system_tmp_redirects})
 
+    # 2e. Otro agente en modo no interactivo y borrados recursivos de Windows: confirmación determinista
+    if wrapper:
+        _decide("ask", f"El comando lanza otro agente: {wrapper[1]}. Se requiere confirmación explícita.", command,
+                "structure.agent_wrapper")
+    if windows:
+        _decide("ask", windows[2], command, windows[1])
+
     # 3. Confirmaciones deterministas, antes del auto-allow (un 'allow' salta el sistema de permisos de Claude Code)
     pat = ask_pattern_hit(command)
     if pat:
@@ -1123,19 +1246,18 @@ def evaluate_command_safety(command: str, cwd: str) -> None:
     sys.exit(0)
 
 
+def evaluate(event: hosts.HookEvent) -> None:
+    """Solo aplica a comandos de shell (Bash, run_command, shell… según el host)."""
+    if event.kind != "shell":
+        return
+    evaluate_command_safety(event.command, event.cwd or os.getcwd())
+
+
 def main() -> None:
     data = read_hook_input("block_dangerous")
     if not data:
         sys.exit(0)
-
-    # Solo aplica a ejecuciones de la herramienta Bash
-    if data.get("tool_name") != "Bash":
-        sys.exit(0)
-
-    command = data.get("tool_input", {}).get("command", "")
-    cwd = data.get("cwd") or os.getcwd()
-
-    evaluate_command_safety(command, cwd)
+    evaluate(hosts.normalize("claude", data))
 
 
 if __name__ == "__main__":

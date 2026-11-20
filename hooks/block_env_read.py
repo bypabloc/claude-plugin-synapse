@@ -50,6 +50,8 @@ import sys
 # Agregar directorio actual a sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import hosts  # noqa: E402
+
 from common import (
     build_env_block_message,
     emit_block,
@@ -242,28 +244,30 @@ def evaluate_bash_env_read(command: str, cwd: str) -> None:
     sys.exit(0)
 
 
+def evaluate(event: hosts.HookEvent) -> None:
+    """Lecturas con la herramienta de lectura del host y comandos de shell."""
+    cwd = event.cwd or os.getcwd()
+
+    if event.kind == "read":
+        file_path = event.read_path
+        resolved = resolve_path(file_path, cwd)
+        if resolved and is_env_file(resolved):
+            emit_block(build_env_block_message(resolved), hook_name="block_env_read", tool_name=event.tool, target=resolved,
+                       decided_by="python", rule="read_tool.env_file")
+        record_audit_log("ALLOW", "block_env_read", event.tool, file_path, "Lectura permitida (no es .env sensible)", rule="read_tool.not_env")
+        sys.exit(0)
+
+    if event.kind == "shell":
+        evaluate_bash_env_read(event.command, cwd)
+
+    sys.exit(0)
+
+
 def main() -> None:
     data = read_hook_input("block_env_read")
     if not data:
         sys.exit(0)
-
-    tool_name = data.get("tool_name")
-    cwd = data.get("cwd") or os.getcwd()
-
-    if tool_name == "Read":
-        file_path = data.get("tool_input", {}).get("file_path", "")
-        resolved = resolve_path(file_path, cwd)
-        if resolved and is_env_file(resolved):
-            emit_block(build_env_block_message(resolved), hook_name="block_env_read", tool_name="Read", target=resolved,
-                       decided_by="python", rule="read_tool.env_file")
-        record_audit_log("ALLOW", "block_env_read", "Read", file_path, "Lectura permitida (no es .env sensible)", rule="read_tool.not_env")
-        sys.exit(0)
-
-    if tool_name == "Bash":
-        command = data.get("tool_input", {}).get("command", "")
-        evaluate_bash_env_read(command, cwd)
-
-    sys.exit(0)
+    evaluate(hosts.normalize("claude", data))
 
 
 if __name__ == "__main__":

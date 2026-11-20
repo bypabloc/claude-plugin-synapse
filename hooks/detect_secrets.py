@@ -47,11 +47,14 @@ import sys
 # Agregar directorio actual a sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import hosts  # noqa: E402
+
 from common import (
     emit_block,
     emit_decision,
     get_laya_router,
     log_step,
+    project_config_path,
     read_hook_input,
     record_audit_log,
     run_main,
@@ -165,11 +168,11 @@ def project_password_values(cwd: str = "") -> frozenset[str]:
 
     Archivo ausente o inválido -> conjunto vacío (la firma bloquea como siempre).
     """
-    root = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
-    if not root:
+    path = project_config_path("secrets", cwd)
+    if not path:
         return frozenset()
     try:
-        with open(os.path.join(root, PROJECT_SECRETS_CONFIG), encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             values = json.load(fh).get("password_rule_values")
     except (OSError, ValueError, AttributeError):
         return frozenset()
@@ -248,22 +251,19 @@ def evaluate_content_secrets(content: str, tool_name: str = "Edit/Write", cwd: s
     sys.exit(0)
 
 
+def evaluate(event: hosts.HookEvent) -> None:
+    """Contenido nuevo de una escritura: Write completo, new_string, o líneas '+' de un patch (varios archivos)."""
+    if event.kind != "write":
+        return
+    content = "\n".join(change.new_text for change in event.files)
+    evaluate_content_secrets(content, event.tool, event.cwd)
+
+
 def main() -> None:
     data = read_hook_input("detect_secrets")
     if not data:
         sys.exit(0)
-
-    tool_name = data.get("tool_name", "")
-    content = ""
-
-    if tool_name == "Edit":
-        content = data.get("tool_input", {}).get("new_string", "")
-    elif tool_name == "Write":
-        content = data.get("tool_input", {}).get("content", "")
-    else:
-        sys.exit(0)
-
-    evaluate_content_secrets(content, tool_name, data.get("cwd", ""))
+    evaluate(hosts.normalize("claude", data))
 
 
 if __name__ == "__main__":

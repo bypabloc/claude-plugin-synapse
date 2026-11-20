@@ -26,7 +26,6 @@ Uso manual:
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -39,6 +38,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator
+
+from filelock import lock_exclusive
+
+# Windows nativo no tiene sockets Unix: el módulo se importa igual (los hooks no deben romperse) y pedir una
+# inferencia falla con un error claro que los hooks registran como `laya result=error` (spec 001 · V-09).
+_UnixServer: Any = getattr(socketserver, "UnixStreamServer", socketserver.TCPServer)
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 IDLE_SECONDS = float(os.environ.get("SYNAPSE_LAYA_IDLE_SECONDS", "1200"))
@@ -55,9 +60,21 @@ def runtime_dir() -> Path:
     return Path(base) / "synapse"
 
 
+def daemon_identity() -> str:
+    """Versión del plugin y tamaño del delta: la misma versión instalada en varios hosts (Claude, Codex, OpenCode)
+    comparte un daemon y una sola copia del checkpoint en la GPU; otra versión trae otro delta y otra política."""
+    try:
+        version = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError):
+        version = str(PLUGIN_ROOT)  # sin manifiesto (copia suelta): una por ruta, como antes
+    delta = PLUGIN_ROOT / "models" / "laya-block-dangerous-delta.safetensors"
+    size = delta.stat().st_size if delta.exists() else 0
+    return f"{version}|{size}"
+
+
 def socket_path(mode: str) -> Path:
-    """Un daemon por instalación del plugin y modo: otra versión trae otro delta y otra política."""
-    key = hashlib.sha1(f"{PLUGIN_ROOT}|{mode}".encode()).hexdigest()[:12]
+    """Un daemon por versión del plugin y modo (daemon_identity)."""
+    key = hashlib.sha1(f"{daemon_identity()}|{mode}".encode()).hexdigest()[:12]
     path = runtime_dir() / f"laya-{key}.sock"
     if len(str(path)) >= MAX_SOCKET_PATH:  # bind() falla con rutas de más de ~108 bytes
         path = Path.home() / ".cache" / "synapse" / path.name
@@ -68,6 +85,8 @@ def socket_path(mode: str) -> Path:
 
 
 def send(path: Path, payload: dict[str, Any], timeout: float = REQUEST_SECONDS) -> dict[str, Any]:
+    if not hasattr(socket, "AF_UNIX"):
+        raise OSError("el daemon de Laya necesita sockets Unix: Windows nativo aún no está soportado (V-09)")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.settimeout(timeout)
         conn.connect(str(path))
@@ -103,7 +122,7 @@ def _lock_held(path: Path) -> bool:
     """True si algún daemon tiene el lock de esta ruta (está atendiendo o arrancando)."""
     try:
         with open(f"{path}.lock") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_exclusive(lock_file.fileno(), blocking=False)
             return False
     except BlockingIOError:
         return True
@@ -153,7 +172,7 @@ def _to_json(value: Any) -> Any:
     return value.item() if hasattr(value, "item") else str(value)
 
 
-class LayaServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+class LayaServer(socketserver.ThreadingMixIn, _UnixServer):
     daemon_threads = True
     # El default (5) rechaza conexiones en ráfagas: 4 hooks por tool_use y varias sesiones a la vez
     request_queue_size = 64
@@ -220,7 +239,7 @@ def serve(path: Path, factory: Callable[[], Predictor], idle_seconds: float = ID
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with open(f"{path}.lock", "w") as lock_file:
         try:
-            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_exclusive(lock_file.fileno(), blocking=False)
         except BlockingIOError:
             return
         _log(f"escuchando en {path} (inactividad máxima {idle_seconds:.0f} s)")

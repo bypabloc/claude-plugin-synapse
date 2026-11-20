@@ -23,7 +23,6 @@ Ejemplos de Uso:
 
 from __future__ import annotations
 
-import fcntl
 import fnmatch
 import functools
 import importlib.util
@@ -37,7 +36,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import hosts
 import laya_daemon
+from filelock import lock_exclusive
 
 # Solo se comprueba que existan: importarlos aquí costaba 1.7 s en cada hook
 _LAYA_AVAILABLE = all(importlib.util.find_spec(m) is not None for m in ("laya", "torch"))
@@ -85,6 +86,22 @@ ASK_PATTERNS = (
     # Configuración de Synapse por proyecto: el agente no debe ampliar su propia lista blanca sin aprobación
     ".claude/synapse-commands.json",
     ".claude/synapse-secrets.json",
+    ".synapse/",
+    # Gobierno de los otros hosts (spec 001 · R-03): hooks, permisos, reglas y plugins que el agente no debe tocar solo
+    ".codex/config.toml",
+    ".codex/hooks.json",
+    ".codex/rules/",
+    ".codex/agents/",
+    "AGENTS.override.md",
+    ".agents/plugins/marketplace.json",
+    ".agents/hooks.json",
+    ".agents/mcp_config.json",
+    ".agents/plugins.json",
+    ".agents/rules/",
+    "opencode.json",
+    "opencode.jsonc",
+    ".opencode/plugins/",
+    ".opencode/tools/",
 )
 
 
@@ -159,13 +176,46 @@ def get_laya_router() -> LayaClient:
     return LayaClient()
 
 
+def state_dir() -> Path:
+    """Estado de Synapse fuera de Claude Code (logs de otros hosts, aprobaciones): SYNAPSE_STATE_DIR, o
+    ${XDG_STATE_HOME:-~/.local/state}/synapse (Linux, macOS) o %LOCALAPPDATA%\\synapse (Windows)."""
+    override = os.environ.get("SYNAPSE_STATE_DIR")
+    if override:
+        return Path(override).expanduser()
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "synapse"
+    return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "synapse"
+
+
+def project_root(cwd: str = "") -> str:
+    """Raíz del proyecto de la sesión: la del host (fuera de Claude Code), CLAUDE_PROJECT_DIR o el cwd."""
+    return hosts.project_dir_override() or os.environ.get("CLAUDE_PROJECT_DIR") or cwd
+
+
+def project_config_path(name: str, cwd: str = "") -> str | None:
+    """Config de Synapse por proyecto: `.synapse/<name>.json` (neutro) gana sobre `.claude/synapse-<name>.json`."""
+    root = project_root(cwd)
+    if not root:
+        return None
+    candidates = [os.path.join(root, ".synapse", f"{name}.json"), os.path.join(root, ".claude", f"synapse-{name}.json")]
+    found = [c for c in candidates if os.path.isfile(c)]
+    if len(found) == 2:
+        log_step("config.legacy_ignored", used=found[0], ignored=found[1])
+    return found[0] if found else None
+
+
+def claude_log_dir() -> Path:
+    claude_dir = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    return Path(claude_dir).expanduser() / "logs" / "synapse"
+
+
 def get_log_dir() -> Path:
-    """Directorio único de logs: $SYNAPSE_LOG_DIR (tests) o ${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse."""
+    """Logs: $SYNAPSE_LOG_DIR (tests); en Claude Code ${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse; en los demás
+    hosts <state_dir>/logs. synapse_log.py lee ambos."""
     override = os.environ.get("SYNAPSE_LOG_DIR")
     if override:
         return Path(override).expanduser()
-    claude_dir = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
-    return Path(claude_dir).expanduser() / "logs" / "synapse"
+    return claude_log_dir() if hosts.current_host() == "claude" else state_dir() / "logs"
 
 
 def get_log_file(day: datetime | None = None) -> Path:
@@ -225,6 +275,8 @@ def start_trace(hook_name: str, data: dict[str, Any]) -> None:
         if key in tool_input:
             summary[f"{key}_chars"] = len(tool_input[key] or "")
     summary["engine"] = engine_mode()
+    if hosts.current_host() != "claude":
+        summary["host"] = hosts.current_host()
     log_step("input", **summary)
 
 
@@ -257,7 +309,7 @@ def log_step(step: str, **fields: Any) -> None:
         # Un solo write() bajo flock: un hook matado a mitad de línea dejaba '{"ts"' pegado al registro siguiente
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            lock_exclusive(fd)
             os.write(fd, line)
         finally:
             os.close(fd)
@@ -395,6 +447,8 @@ def emit_decision(
     """
     shown = f"{attribution(hook_name, decided_by, rule)}: {reason}"
     record_audit_log(decision.lower(), hook_name, tool_name, target, reason, decided_by=decided_by, rule=rule, evidence=evidence)
+    if hosts.collect(hosts.Decision(decision.lower(), hook_name, rule, decided_by, reason, target, shown, context)):
+        raise hosts.Decided()
     payload: dict[str, Any] = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -422,6 +476,8 @@ def emit_block(
     """Bloquea la herramienta (exit 2). stderr, que Claude Code muestra en pantalla, dice quién bloqueó y por qué."""
     header = attribution(hook_name, decided_by, rule)
     record_audit_log("BLOCKED", hook_name, tool_name, target, reason, decided_by=decided_by, rule=rule, evidence=evidence)
+    if hosts.collect(hosts.Decision("block", hook_name, rule, decided_by, reason, target, f"{header}: {reason}")):
+        raise hosts.Decided()
     sys.stderr.write(f"🚫 BLOCKED · {header}\n{reason}\n")
     sys.exit(exit_code)
 
@@ -785,8 +841,11 @@ def allowed_roots(cwd: str) -> tuple[str, ...]:
         repo: `git worktree add ../<repo>-worktrees/<rama>`).
       - La memoria de Claude Code del proyecto: `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<ruta-con-guiones>/memory`.
     """
+    # Fuera de Claude Code el ancla es el proyecto del evento: Codex hereda CLAUDE_PROJECT_DIR del proceso padre
+    override = hosts.project_dir_override()
+    anchor = override or os.environ.get("CLAUDE_PROJECT_DIR") or cwd
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
-    return _roots_for(os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR") or cwd), os.path.realpath(config_dir))
+    return _roots_for(os.path.realpath(anchor), os.path.realpath(config_dir), override is None)
 
 
 def claude_memory_dir(project_dir: str, config_dir: str) -> str:
@@ -795,7 +854,7 @@ def claude_memory_dir(project_dir: str, config_dir: str) -> str:
 
 
 @functools.lru_cache(maxsize=8)
-def _roots_for(anchor: str, config_dir: str) -> tuple[str, ...]:
+def _roots_for(anchor: str, config_dir: str, with_memory: bool = True) -> tuple[str, ...]:
     candidates = _git_lines(anchor, "rev-parse", "--show-toplevel", "--show-superproject-working-tree")
     worktrees = [line[len("worktree "):] for line in _git_lines(anchor, "worktree", "list", "--porcelain") if line.startswith("worktree ")]
     candidates += worktrees
@@ -805,7 +864,8 @@ def _roots_for(anchor: str, config_dir: str) -> tuple[str, ...]:
         return (anchor,)
     main = os.path.realpath(worktrees[0]) if worktrees else roots[0]  # el primero del porcelain es el principal
     extra = [os.path.join(os.path.dirname(main), os.path.basename(main) + "-worktrees")]
-    extra += [claude_memory_dir(p, config_dir) for p in dict.fromkeys([anchor, *roots])]
+    if with_memory:  # la memoria de Claude Code solo es parte del proyecto en Claude Code
+        extra += [claude_memory_dir(p, config_dir) for p in dict.fromkeys([anchor, *roots])]
     return tuple(dict.fromkeys(roots + [e for e in extra if e not in too_wide]))
 
 
