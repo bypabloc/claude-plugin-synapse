@@ -1,0 +1,12 @@
+{
+  "event": {
+    "tool": "shell",
+    "sessionID": "ses_e05c336e8ffeyTuOROvd6TO60e",
+    "agent": "build",
+    "messageID": "msg_1fa3ccb5e001jVjml2LaHWsqVJ",
+    "id": "call_1795199650664",
+    "input": {
+      "command": "ls -la"
+    }
+  }
+}

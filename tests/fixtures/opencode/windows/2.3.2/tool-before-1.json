@@ -1,0 +1,12 @@
+{
+  "event": {
+    "tool": "shell",
+    "sessionID": "ses_e05c1879bffeAmoGAg706sxn5H",
+    "agent": "build",
+    "messageID": "msg_1fa3e7d7e001MYC2c8JOsAdz3J",
+    "id": "call_1795199761814",
+    "input": {
+      "command": "Get-ChildItem"
+    }
+  }
+}

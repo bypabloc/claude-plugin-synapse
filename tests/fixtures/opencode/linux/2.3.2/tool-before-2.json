@@ -1,0 +1,12 @@
+{
+  "event": {
+    "tool": "read",
+    "sessionID": "ses_e05c336e8ffeyTuOROvd6TO60e",
+    "agent": "build",
+    "messageID": "msg_1fa3ccdce001y4qTMFksd0X2pq",
+    "id": "call_1795199651285",
+    "input": {
+      "path": "README.md"
+    }
+  }
+}

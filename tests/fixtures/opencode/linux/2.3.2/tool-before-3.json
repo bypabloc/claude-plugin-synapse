@@ -1,0 +1,13 @@
+{
+  "event": {
+    "tool": "write",
+    "sessionID": "ses_e05c336e8ffeyTuOROvd6TO60e",
+    "agent": "build",
+    "messageID": "msg_1fa3cce110012swT3pMQUyvSRC",
+    "id": "call_1795199651351",
+    "input": {
+      "path": "a.txt",
+      "content": "hola"
+    }
+  }
+}

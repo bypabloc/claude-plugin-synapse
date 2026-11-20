@@ -1,0 +1,24 @@
+{
+  "stdin": {
+    "session_id": "01a1fa36-5022-74a3-b8d7-f2fcaa57c69d",
+    "turn_id": "01a1fa36-52bf-7d50-8656-15222b94c343",
+    "transcript_path": "{monorepo}/tmp/probe-home/codex/sessions/2026/11/20/rollout-2026-11-20T13-27-06-01a1fa36-5022-74a3-b8d7-f2fcaa57c69d.jsonl",
+    "cwd": "{project}",
+    "hook_event_name": "PreToolUse",
+    "model": "gpt-6.2-sol",
+    "permission_mode": "bypassPermissions",
+    "tool_name": "apply_patch",
+    "tool_input": {
+      "command": "*** Begin Patch\n*** Add File: a.txt\n+hola\n*** End Patch"
+    },
+    "tool_use_id": "exec-5cfb3a79-b344-4d36-8ef4-c75c4fb6c2a2"
+  },
+  "env": {
+    "CLAUDE_PLUGIN_DATA": "{monorepo}/tmp/probe-home/codex/plugins/data/probe-probe-market",
+    "CLAUDE_PLUGIN_ROOT": "{monorepo}/tmp/probe-home/codex/plugins/cache/probe-market/probe/0.0.1",
+    "CODEX_HOME": "{monorepo}/tmp/probe-home/codex",
+    "PLUGIN_DATA": "{monorepo}/tmp/probe-home/codex/plugins/data/probe-probe-market",
+    "PLUGIN_ROOT": "{monorepo}/tmp/probe-home/codex/plugins/cache/probe-market/probe/0.0.1"
+  },
+  "platform": "linux"
+}

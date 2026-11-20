@@ -1,0 +1,27 @@
+{
+  "stdin": {
+    "artifactDirectoryPath": "{home}\\.gemini\\antigravity-cli\\brain\\94ac004a-0c1d-4ccf-b9c2-488ba752c1c2",
+    "conversationId": "94ac004a-0c1d-4ccf-b9c2-488ba752c1c2",
+    "cwd": "{project}",
+    "hookEventName": "PreToolUse",
+    "lastUserInput": "Do these steps in order, one tool call each, without asking me anything: 1) run the shell command 'Get-ChildItem'. 2) read the file README.md with your file-reading tool. 3) create the file a.txt containing 'hola'. 4) edit a.txt replacing 'hola' with 'chau'. 5) run the shell command 'Remove-Item a.txt'. Then reply DONE.",
+    "modelName": "gemini-3.8-flash-medium",
+    "stepIdx": 7,
+    "toolCall": {
+      "args": {
+        "Content": "hola",
+        "Path": "{project}\\a.txt"
+      },
+      "id": "call_9405963056936459077",
+      "name": "write_file"
+    },
+    "transcriptPath": "{home}\\.gemini\\antigravity-cli\\brain\\94ac004a-0c1d-4ccf-b9c2-488ba752c1c2\\.system_generated\\logs\\transcript_full.jsonl",
+    "workspacePaths": [
+      "{project}"
+    ]
+  },
+  "env": {
+    "PLUGIN_ROOT": "{project}\\.agents\\plugins\\probe"
+  },
+  "platform": "win32"
+}

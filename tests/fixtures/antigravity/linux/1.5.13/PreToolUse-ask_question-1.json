@@ -1,0 +1,37 @@
+{
+  "stdin": {
+    "artifactDirectoryPath": "{home}/.gemini/antigravity-cli/brain/525c6e4b-7d04-40c6-8d35-fbf9d4933283",
+    "conversationId": "525c6e4b-7d04-40c6-8d35-fbf9d4933283",
+    "cwd": "{project}",
+    "hookEventName": "PreToolUse",
+    "lastUserInput": "Before doing anything else, ask me which color I prefer using your tool for asking the user a question (do not just write the question as text). Then stop.",
+    "modelName": "gemini-4-argon-low",
+    "stepIdx": 2,
+    "toolCall": {
+      "args": {
+        "questions": [
+          {
+            "is_multi_select": false,
+            "options": [
+              "(Recommended) Blue",
+              "Red",
+              "Green",
+              "Yellow"
+            ],
+            "question": "Which color do you prefer?"
+          }
+        ]
+      },
+      "id": "call_9911330427015607238",
+      "name": "ask_question"
+    },
+    "transcriptPath": "{home}/.gemini/antigravity-cli/brain/525c6e4b-7d04-40c6-8d35-fbf9d4933283/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "{project}"
+    ]
+  },
+  "env": {
+    "PLUGIN_ROOT": "{project}/.agents/plugins/probe"
+  },
+  "platform": "linux"
+}

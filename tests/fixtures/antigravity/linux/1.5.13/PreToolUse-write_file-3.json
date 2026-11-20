@@ -1,0 +1,28 @@
+{
+  "stdin": {
+    "artifactDirectoryPath": "{home}/.gemini/antigravity-cli/brain/cfc1234d-a99d-4acc-9659-c4f7e067d517",
+    "conversationId": "cfc1234d-a99d-4acc-9659-c4f7e067d517",
+    "cwd": "{project}",
+    "hookEventName": "PreToolUse",
+    "lastUserInput": "Do these steps in order, one tool call each, without asking me anything: 1) run the shell command 'ls -la'. 2) read the file README.md with your file-reading tool. 3) create the file a.txt containing 'hola'. 4) edit a.txt replacing 'hola' with 'chau'. 5) in ONE single edit operation create b.txt and c.txt (any content). 6) run the shell command 'git add -A && git commit -q -m probe && git log -1 --format=%h'. 7) run the shell command 'sleep 1 && echo listo' in the background if your tools allow it. Then reply DONE.",
+    "modelName": "gemini-4-argon-low",
+    "stepIdx": 13,
+    "toolCall": {
+      "args": {
+        "Content": "c",
+        "Overwrite": true,
+        "Path": "{project}/c.txt"
+      },
+      "id": "call_3253847663782900447",
+      "name": "write_file"
+    },
+    "transcriptPath": "{home}/.gemini/antigravity-cli/brain/cfc1234d-a99d-4acc-9659-c4f7e067d517/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "{project}"
+    ]
+  },
+  "env": {
+    "PLUGIN_ROOT": "{project}/.agents/plugins/probe"
+  },
+  "platform": "linux"
+}

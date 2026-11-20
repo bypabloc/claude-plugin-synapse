@@ -1,0 +1,24 @@
+{
+  "stdin": {
+    "session_id": "01a1fa3f-b90f-7181-a315-fa3bb99008c4",
+    "turn_id": "01a1fa3f-bb13-7b42-94b6-f6651dcb3a01",
+    "transcript_path": "{home}\\AppData\\Local\\Temp\\agent-plugins-probe\\codex-home\\sessions\\2026\\11\\20\\rollout-2026-11-20T13-37-23-01a1fa3f-b90f-7181-a315-fa3bb99008c4.jsonl",
+    "cwd": "{project}",
+    "hook_event_name": "PreToolUse",
+    "model": "gpt-6.2-sol",
+    "permission_mode": "bypassPermissions",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "Get-Content -LiteralPath README.md"
+    },
+    "tool_use_id": "exec-ff57ec08-ec4a-463a-ad23-da1572691da1"
+  },
+  "env": {
+    "CLAUDE_PLUGIN_DATA": "{home}\\AppData\\Local\\Temp\\agent-plugins-probe\\codex-home\\plugins\\data\\probe-probe-market",
+    "CLAUDE_PLUGIN_ROOT": "{home}\\AppData\\Local\\Temp\\agent-plugins-probe\\codex-home\\plugins\\cache\\probe-market\\probe\\0.0.1",
+    "CODEX_HOME": "{home}\\AppData\\Local\\Temp\\agent-plugins-probe\\codex-home",
+    "PLUGIN_DATA": "{home}\\AppData\\Local\\Temp\\agent-plugins-probe\\codex-home\\plugins\\data\\probe-probe-market",
+    "PLUGIN_ROOT": "{home}\\AppData\\Local\\Temp\\agent-plugins-probe\\codex-home\\plugins\\cache\\probe-market\\probe\\0.0.1"
+  },
+  "platform": "win32"
+}

@@ -1,0 +1,24 @@
+{
+  "stdin": {
+    "session_id": "01a1fa36-5022-74a3-b8d7-f2fcaa57c69d",
+    "turn_id": "01a1fa36-52bf-7d50-8656-15222b94c343",
+    "transcript_path": "{monorepo}/tmp/probe-home/codex/sessions/2026/11/20/rollout-2026-11-20T13-27-06-01a1fa36-5022-74a3-b8d7-f2fcaa57c69d.jsonl",
+    "cwd": "{project}",
+    "hook_event_name": "PreToolUse",
+    "model": "gpt-6.2-sol",
+    "permission_mode": "bypassPermissions",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "ls -la"
+    },
+    "tool_use_id": "exec-70950e12-6bbc-4d4a-b389-e2065ffe355b"
+  },
+  "env": {
+    "CLAUDE_PLUGIN_DATA": "{monorepo}/tmp/probe-home/codex/plugins/data/probe-probe-market",
+    "CLAUDE_PLUGIN_ROOT": "{monorepo}/tmp/probe-home/codex/plugins/cache/probe-market/probe/0.0.1",
+    "CODEX_HOME": "{monorepo}/tmp/probe-home/codex",
+    "PLUGIN_DATA": "{monorepo}/tmp/probe-home/codex/plugins/data/probe-probe-market",
+    "PLUGIN_ROOT": "{monorepo}/tmp/probe-home/codex/plugins/cache/probe-market/probe/0.0.1"
+  },
+  "platform": "linux"
+}
