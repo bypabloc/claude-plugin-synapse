@@ -20,7 +20,8 @@ Investigación sobre **todo lo necesario para construir plugins, extensiones, ho
 | [`06-github-copilot.md`](./06-github-copilot.md) | Copilot CLI, app, VS Code (harnesses), cloud agent y JetBrains: Agent Plugins 1.0 y legado, 14 eventos, skills, prompts, agentes, MCP, instrucciones, LSP, extensiones JS del CLI, políticas de org |
 | [`07-herdr.md`](./07-herdr.md) | Herdr TUI, herdr-core y app: `herdr-plugin.toml`, 22 eventos, socket API, integraciones con cada agente, OSC 7501, mods JS, y riesgos de ejecución indirecta para plugins de seguridad |
 | [`08-guia-plugin-multi-agente.md`](./08-guia-plugin-multi-agente.md) | Estrategia por capas, layout de un repo multi-agente, colisiones de rutas, adaptación de hooks, traducción de cada componente, pruebas, distribución y checklist |
-| [`09-caso-de-estudio-synapse.md`](./09-caso-de-estudio-synapse.md) | Synapse: acoplamiento con Claude Code, riesgo de instalarlo sin adaptar en cada agente, arquitectura de adaptadores, plan por fases y verificaciones pendientes |
+| [`09-caso-de-estudio-synapse.md`](./09-caso-de-estudio-synapse.md) | Synapse (hooks por subprocess): acoplamiento con Claude Code, riesgo de instalarlo sin adaptar en cada agente, arquitectura de adaptadores, plan por fases y verificaciones pendientes |
+| [`10-caso-de-estudio-session-handoff.md`](./10-caso-de-estudio-session-handoff.md) | session-handoff (mod en TypeScript): API de mods de Claude Code, viabilidad por agente de reinyección, `Stop`, compactación sin resumen, telemetría, UI y runtime, y diseño de port |
 
 ---
 

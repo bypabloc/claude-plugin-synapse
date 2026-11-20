@@ -220,4 +220,6 @@
 - **Codex y Copilot convierten o leen plugins de Claude**; Antigravity tiene `agy plugin import claude`; Cursor los importa automáticamente sin opt-out en el CLI.
 - **Los multiplexores (Herdr) abren vías de ejecución indirecta** que ningún hook de agente ve.
 
-Guía práctica: [`08-guia-plugin-multi-agente.md`](./08-guia-plugin-multi-agente.md). Caso real: [`09-caso-de-estudio-synapse.md`](./09-caso-de-estudio-synapse.md).
+- **Los mods de Claude Code (TypeScript en proceso) no tienen equivalente salvo OpenCode**: reemplazar la compactación, dibujar UI interactiva o leer telemetría interna solo es posible ahí. OpenCode es además el único host con runtime embebido (Bun) para correr lógica sin instalar nada.
+
+Guía práctica: [`08-guia-plugin-multi-agente.md`](./08-guia-plugin-multi-agente.md). Casos reales: [`09-caso-de-estudio-synapse.md`](./09-caso-de-estudio-synapse.md) (hooks por subprocess) y [`10-caso-de-estudio-session-handoff.md`](./10-caso-de-estudio-session-handoff.md) (mod en proceso).

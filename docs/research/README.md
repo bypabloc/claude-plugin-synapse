@@ -80,3 +80,4 @@ Investigación sobre todo lo necesario para construir plugins, extensiones, hook
 | [`07-herdr.md`](./multi_agent_support/07-herdr.md) | Herdr: plugins, socket API, integraciones y ejecución indirecta |
 | [`08-guia-plugin-multi-agente.md`](./multi_agent_support/08-guia-plugin-multi-agente.md) | Cómo construir un plugin para varios agentes desde un solo repo |
 | [`09-caso-de-estudio-synapse.md`](./multi_agent_support/09-caso-de-estudio-synapse.md) | Synapse: acoplamiento, riesgos, arquitectura de adaptadores y plan |
+| [`10-caso-de-estudio-session-handoff.md`](./multi_agent_support/10-caso-de-estudio-session-handoff.md) | session-handoff: API de mods de Claude Code y port de un mod a otros agentes |
