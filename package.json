@@ -1,6 +1,6 @@
 {
   "name": "@bypabloc/synapse",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Guardrails de seguridad de Synapse para OpenCode V2 (shim en proceso que llama a hooks/dispatch.py).",
   "type": "module",
   "exports": { ".": "./adapters/opencode/index.ts" },

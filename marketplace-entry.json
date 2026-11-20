@@ -1,7 +1,7 @@
 {
   "name": "synapse",
   "description": "Guardrails de seguridad antes de cada tool: comandos destructivos, escrituras fuera del proyecto, lectura de .env, secretos y archivos protegidos (reglas deterministas + Laya System 1).",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "author": {
     "name": "Pablo Contreras",
     "email": "pacg1991@gmail.com",
