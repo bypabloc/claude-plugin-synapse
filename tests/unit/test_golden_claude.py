@@ -36,6 +36,17 @@ def _normalize(text: str) -> str:
     return text
 
 
+@pytest.fixture(autouse=True)
+def default_claude_config(monkeypatch):
+    """El perfil de Claude del entorno (CLAUDE_CONFIG_DIR) cambia la memoria del proyecto: se fija el de por defecto."""
+    import common
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))
+    common.allowed_roots.cache_clear()
+    yield
+    common.allowed_roots.cache_clear()
+
+
 @pytest.mark.parametrize("hook,case", CASES, ids=[f"{h}/{c['name']}" for h, c in CASES])
 def test_output_matches_golden(hook: str, case: dict) -> None:
     setup = materialize_setup_file(case)

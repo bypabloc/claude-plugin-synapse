@@ -327,7 +327,7 @@
  "block_dangerous/block_outside_claude_config": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre {home}/.claude/settings.json.\nComando recibido: rm -f ~/.claude/settings.json\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre {claude_config}/settings.json.\nComando recibido: rm -f ~/.claude/settings.json\n"
  },
  "block_dangerous/block_outside_cp_dest": {
   "exit": 2,
