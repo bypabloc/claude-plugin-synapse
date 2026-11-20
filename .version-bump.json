@@ -1,0 +1,7 @@
+{
+  "files": [
+    { "path": ".claude-plugin/plugin.json", "key": "version" },
+    { "path": "marketplace-entry.json", "key": "version" },
+    { "path": "pyproject.toml", "regex": "(?m)^version = \"([^\"]+)\"" }
+  ]
+}
