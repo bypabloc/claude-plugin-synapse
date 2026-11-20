@@ -1,12 +1,11 @@
 # Repositorio Central de Investigaciones Técnicas
 
-Este directorio contiene tres investigaciones técnicas independientes, exhaustivas y estructuradas por módulos:
+Este directorio contiene dos investigaciones técnicas independientes, exhaustivas y estructuradas por módulos. La tercera (soporte multi-agente) vive en el monorepo (§3).
 
 ```text
 docs/research/
 ├── laya/                 # Motor de inferencia tipada System 1 (convaiinnovations/laya)
-├── claude_plugins/       # Arquitectura, desarrollo y distribución de Plugins para Claude Code
-└── multi_agent_support/  # Portabilidad de Synapse a Codex, Antigravity, OpenCode, Cursor, Copilot y Herdr
+└── claude_plugins/       # Arquitectura, desarrollo y distribución de Plugins para Claude Code
 ```
 
 ---
@@ -65,19 +64,4 @@ La investigación incorpora y analiza en detalle la arquitectura de dos implemen
 
 ## 3. Módulo: Soporte Multi-Agente
 
-Investigación sobre todo lo necesario para construir plugins, extensiones, hooks y mods en los agentes de código más usados (Codex, Antigravity, Gemini CLI, OpenCode, Cursor, Copilot y Herdr), comparados componente por componente con los plugins de Claude Code. Incluye una guía para construir un plugin multi-agente y un caso de estudio (Synapse). Corte al 2026-11-19.
-
-👉 **Índice principal:** [`multi_agent_support/README.md`](./multi_agent_support/README.md)
-
-| Archivo | Temática |
-| :--- | :--- |
-| [`01-panorama-y-matrices-por-componente.md`](./multi_agent_support/01-panorama-y-matrices-por-componente.md) | Niveles de portabilidad y matrices por componente entre todos los agentes |
-| [`02-codex.md`](./multi_agent_support/02-codex.md) | OpenAI Codex: plugins, hooks, skills, subagentes, MCP, execpolicy, statusline, distribución |
-| [`03-antigravity-y-gemini-cli.md`](./multi_agent_support/03-antigravity-y-gemini-cli.md) | Google Antigravity y Gemini CLI |
-| [`04-opencode.md`](./multi_agent_support/04-opencode.md) | OpenCode V1/V2: plugins en proceso, hooks, TUI, permisos |
-| [`05-cursor.md`](./multi_agent_support/05-cursor.md) | Cursor: plugins, 21 eventos de hook, reglas, import de plugins Claude |
-| [`06-github-copilot.md`](./multi_agent_support/06-github-copilot.md) | Copilot CLI, VS Code, cloud agent y JetBrains |
-| [`07-herdr.md`](./multi_agent_support/07-herdr.md) | Herdr: plugins, socket API, integraciones y ejecución indirecta |
-| [`08-guia-plugin-multi-agente.md`](./multi_agent_support/08-guia-plugin-multi-agente.md) | Cómo construir un plugin para varios agentes desde un solo repo |
-| [`09-caso-de-estudio-synapse.md`](./multi_agent_support/09-caso-de-estudio-synapse.md) | Synapse: acoplamiento, riesgos, arquitectura de adaptadores y plan |
-| [`10-caso-de-estudio-session-handoff.md`](./multi_agent_support/10-caso-de-estudio-session-handoff.md) | session-handoff: API de mods de Claude Code y port de un mod a otros agentes |
+La investigación multi-agente (Codex, Antigravity, Gemini CLI, OpenCode, Cursor, Copilot y Herdr) sirve a todos los plugins del monorepo y vive allí: [`bypabloc/agent-plugins/docs/research/multi_agent_support`](https://github.com/bypabloc/agent-plugins/tree/main/docs/research/multi_agent_support).
