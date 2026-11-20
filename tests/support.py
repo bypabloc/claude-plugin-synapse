@@ -19,6 +19,16 @@ CASES_DIR = Path(__file__).resolve().parent / "cases"
 # Fuera de tmp/: cualquier segmento /tmp/ en la ruta vuelve desechable todo su contenido
 GIT_REPOS_DIR = PROJECT_DIR / ".test_repos"
 
+
+def _git_root(path: Path) -> str:
+    """Toplevel git del plugin: la raíz del monorepo, o el mismo plugin en su espejo."""
+    out = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    return out.stdout.strip() if out.returncode == 0 and out.stdout.strip() else str(path)
+
+
+# Los casos que salen del proyecto con '../' parten de aquí: dentro del monorepo, '../' desde el plugin sigue dentro
+GIT_ROOT = _git_root(PROJECT_DIR)
+
 # Fragmentos que no pueden vivir literales en el repo (GitHub push protection)
 PLACEHOLDERS = {"{stripe_live_prefix}": "sk_" + "live_", "{pw_key}": "pass" + "word", "{PW_KEY}": "PASS" + "WORD"}
 
@@ -38,7 +48,7 @@ class HookResult:
 
 def _expand(value, project: str):
     if isinstance(value, str):
-        value = value.replace("{project}", project)
+        value = value.replace("{project}", project).replace("{gitroot}", GIT_ROOT)
         for key, real in PLACEHOLDERS.items():
             value = value.replace(key, real)
         return value

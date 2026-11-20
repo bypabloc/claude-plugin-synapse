@@ -6,6 +6,9 @@ tests/e2e/test_laya_daemon_gpu.py (pytest --laya gpu).
 
 from __future__ import annotations
 
+import hashlib
+import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -15,11 +18,22 @@ import pytest
 import laya_daemon
 from support import GIT_REPOS_DIR
 
+# Los sockets Unix admiten ~108 caracteres: si el clon vive en una ruta larga (monorepo), se usa el runtime del
+# usuario, como hace el daemon en producción.
+SOCKET_MAX = 100
+
+
+def short_runtime_dir() -> Path:
+    local = GIT_REPOS_DIR / "rt"
+    if len(str(local)) + len("/synapse/laya-0123456789abcdef.sock.pending") < SOCKET_MAX:
+        return local
+    return Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()) / "synapse-tests"
+
 
 @pytest.fixture
 def sock(request) -> Path:
-    # Ruta corta: los sockets Unix admiten ~108 caracteres
-    path = GIT_REPOS_DIR / "rt" / f"{request.node.name[:20]}.sock"
+    name = hashlib.sha256(request.node.name.encode()).hexdigest()[:12]
+    path = short_runtime_dir() / f"{name}.sock"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
     return path
@@ -162,7 +176,7 @@ def test_pending_socket_name_is_never_longer_than_final(monkeypatch) -> None:
 
 
 def test_socket_path_depends_on_plugin_root_and_mode(monkeypatch) -> None:
-    short = GIT_REPOS_DIR / "rt"
+    short = short_runtime_dir()
     monkeypatch.setenv("SYNAPSE_RUNTIME_DIR", str(short))
     gpu, cpu = laya_daemon.socket_path("gpu"), laya_daemon.socket_path("cpu")
     assert gpu != cpu and gpu.parent == short / "synapse"

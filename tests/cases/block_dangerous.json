@@ -257,7 +257,7 @@
       "tool_input": {
         "command": "mv .git ../backup-git"
       },
-      "cwd": "{project}"
+      "cwd": "{gitroot}"
     },
     "expected_exit": 2,
     "expected_in_stderr": "fuera del proyecto"
@@ -584,7 +584,7 @@
       "tool_input": {
         "command": "rm -rf ../optical-soft"
       },
-      "cwd": "{project}"
+      "cwd": "{gitroot}"
     },
     "expected_exit": 2,
     "expected_in_stderr": "fuera del proyecto"
