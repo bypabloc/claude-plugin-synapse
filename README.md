@@ -104,6 +104,24 @@ claude plugin list
 claude plugin details synapse@bypabloc
 ```
 
+### En Codex, Antigravity y OpenCode
+
+Synapse es multi-agente desde 1.7.0 ([spec 001](https://github.com/bypabloc/agent-plugins/tree/main/docs/specs/001-plugins-multi-agente)). La lógica es la misma en todos; cambian la entrada y la salida de cada agente (`hooks/hosts.py`). Requisito: Python 3.10 o superior (`python3` en Linux y macOS; `py -3` o `python` en Windows, o `SYNAPSE_PYTHON`).
+
+| Agente | Instalación (WSL, Linux, macOS o Windows) | Cómo decide |
+| :--- | :--- | :--- |
+| **Codex** ≥ 0.171 | `codex plugin marketplace add bypabloc/agent-plugins` · `codex plugin add synapse@bypabloc-agents` · luego `/hooks` para confiar en los hooks (Codex los ata al hash: repítelo tras cada actualización) | Bloquea con `deny`. Codex no puede preguntar desde un hook: un `ask` responde `deny` con un id, y **tú** apruebas una sola ejecución en tu terminal con `python3 <plugin>/scripts/synapse.py approve <id>` (el agente no puede hacerlo) |
+| **Antigravity** (`agy` ≥ 1.5.4) | `agy plugin install https://github.com/bypabloc/agent-plugin-synapse` | `deny` y `force_ask` nativos. Un error interno pide confirmación (en Antigravity un error equivale a permitir) |
+| **OpenCode** V2 ≥ 2.3 | En `opencode.json`: `"plugins": ["@bypabloc/synapse@git+https://github.com/bypabloc/agent-plugin-synapse.git"]` (opción `{"python": "…"}` para fijar el intérprete) | `throw` para bloquear y `permission.assert` para preguntar. Si Synapse no responde, pregunta |
+
+- **Diagnóstico:** `python3 <plugin>/scripts/synapse.py doctor` revisa el intérprete, los manifiestos, la versión de cada CLI, el delta de Laya y los logs.
+- **Trazas:** Claude Code escribe en `${CLAUDE_CONFIG_DIR:-~/.claude}/logs/synapse/`; los demás agentes en `~/.local/state/synapse/logs/` (`%LOCALAPPDATA%\synapse\logs` en Windows). `scripts/synapse.py log --host codex` las muestra.
+- **Config por proyecto:** `.synapse/commands.json` y `.synapse/secrets.json`, con respaldo en los archivos `.claude/synapse-*.json`.
+- **Límites:**
+  - En Windows nativo, Synapse ya se importa y protege rutas y escrituras (incluido `Set-Content` de Codex), pero el análisis de comandos de PowerShell es parcial: el mínimo está en `windows.*` y la cobertura completa es el spec 002.
+  - Laya no corre en Windows nativo (necesita sockets Unix).
+  - En Codex no existe una herramienta de lectura: el bloqueo de `.env` se aplica a los comandos de shell.
+
 ---
 
 ### Método B: Probar en Modo Desarrollo (Sin Instalar)

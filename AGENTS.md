@@ -98,6 +98,21 @@ Claude Code invoca los scripts en `hooks/` pasando una carga útil JSON vía `st
    - Código de salida: `2`
    - Salida estándar de error (`stderr`): Razón técnica del bloqueo. Claude Code aborta la llamada a la herramienta e informa al usuario.
 
+### 3.1 Otros Agentes (spec 001)
+
+- **Claude Code** sigue usando un script por hook (`hooks/hooks.json`) y su salida no cambia: `tests/golden/claude-1.6.1.json` la fija byte a byte.
+- **Codex, Antigravity y OpenCode** entran por `hooks/dispatch.py --host <h>`. El flujo es este:
+  1. `hosts.normalize` convierte el payload en un `HookEvent` (`kind`: shell, read, write u other; `files` sale de `patch.py` para `apply_patch`).
+  2. Corren en el mismo proceso los hooks del tipo de acción, con `evaluate(event)`. En modo `collect`, `emit_*` entrega un `Decision` en vez de salir.
+  3. `hosts.combine` aplica la precedencia block > ask > allow > pass.
+  4. `hosts.emit` escribe **solo** las claves del contrato del host.
+- **El host se declara** (`--host`). Nunca se deduce del entorno: Codex hereda variables `CLAUDE_*`. Fuera de Claude Code, el ancla de `allowed_roots` es el proyecto del evento y la memoria de Claude no es raíz.
+- **Codex `ask`** → `approvals.py`: `deny` con id, y el usuario aprueba con `scripts/synapse.py approve <id>` desde una terminal (TTY). La regla `structure.self_approval` impide que el agente lo ejecute.
+- **Antigravity:** siempre exit 0 más JSON. Un error interno o un payload irreconocible emiten `force_ask`.
+- **OpenCode:** `adapters/opencode/index.ts` lanza `dispatch.py`. Un error del shim pide confirmación.
+- **Windows:** `run-hook.cmd` (lanzador políglota) y `filelock.py` (lock portátil). Los tests que asumen POSIX corren como `xfail` en Windows (`tests/conftest.py`).
+- **Pruebas por host:** matriz de equivalencia y contratos en `tests/unit/test_hosts.py`; E2E con los binarios reales en `tests/e2e/test_hosts_e2e.py` (`-m e2e_hosts`).
+
 ---
 
 ## 4. Políticas de Guardrails por Hook
