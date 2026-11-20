@@ -65,19 +65,18 @@ La investigación incorpora y analiza en detalle la arquitectura de dos implemen
 
 ## 3. Módulo: Soporte Multi-Agente
 
-Investigación sobre qué hace falta para que Synapse proteja otros agentes de código además de Claude Code: hooks previos a la ejecución, protocolos de entrada/salida, empaquetado y brechas por host, con una propuesta de arquitectura (núcleo neutral + adaptadores) y un plan por fases. Corte al 2026-11-19.
+Investigación sobre todo lo necesario para construir plugins, extensiones, hooks y mods en los agentes de código más usados (Codex, Antigravity, Gemini CLI, OpenCode, Cursor, Copilot y Herdr), comparados componente por componente con los plugins de Claude Code. Incluye una guía para construir un plugin multi-agente y un caso de estudio (Synapse). Corte al 2026-11-19.
 
 👉 **Índice principal:** [`multi_agent_support/README.md`](./multi_agent_support/README.md)
 
 | Archivo | Temática |
 | :--- | :--- |
-| [`01-panorama-y-matriz-de-compatibilidad.md`](./multi_agent_support/01-panorama-y-matriz-de-compatibilidad.md) | Matriz de capacidades, riesgo de instalar sin adaptador, esfuerzo por host |
-| [`02-superficie-de-acoplamiento-de-synapse.md`](./multi_agent_support/02-superficie-de-acoplamiento-de-synapse.md) | Qué ata hoy a Synapse con Claude Code |
-| [`03-codex-cli.md`](./multi_agent_support/03-codex-cli.md) | OpenAI Codex: hooks, `apply_patch`, execpolicy, sandbox |
-| [`04-antigravity-y-gemini-cli.md`](./multi_agent_support/04-antigravity-y-gemini-cli.md) | Google Antigravity y Gemini CLI |
-| [`05-opencode.md`](./multi_agent_support/05-opencode.md) | OpenCode: plugins TS V1/V2 y permisos |
-| [`06-cursor.md`](./multi_agent_support/06-cursor.md) | Cursor: hooks de agente, import de plugins Claude, `.cursor-plugin` |
-| [`07-github-copilot.md`](./multi_agent_support/07-github-copilot.md) | Copilot CLI, VS Code y coding agent |
-| [`08-herdr.md`](./multi_agent_support/08-herdr.md) | Herdr: multiplexor de agentes y ejecución indirecta |
-| [`09-propuesta-de-arquitectura.md`](./multi_agent_support/09-propuesta-de-arquitectura.md) | Núcleo neutral, matriz de emisión, parser de patches, empaquetado |
-| [`10-plan-de-implementacion-y-verificaciones.md`](./multi_agent_support/10-plan-de-implementacion-y-verificaciones.md) | Fases, estrategia de tests, verificaciones pendientes |
+| [`01-panorama-y-matrices-por-componente.md`](./multi_agent_support/01-panorama-y-matrices-por-componente.md) | Niveles de portabilidad y matrices por componente entre todos los agentes |
+| [`02-codex.md`](./multi_agent_support/02-codex.md) | OpenAI Codex: plugins, hooks, skills, subagentes, MCP, execpolicy, statusline, distribución |
+| [`03-antigravity-y-gemini-cli.md`](./multi_agent_support/03-antigravity-y-gemini-cli.md) | Google Antigravity y Gemini CLI |
+| [`04-opencode.md`](./multi_agent_support/04-opencode.md) | OpenCode V1/V2: plugins en proceso, hooks, TUI, permisos |
+| [`05-cursor.md`](./multi_agent_support/05-cursor.md) | Cursor: plugins, 21 eventos de hook, reglas, import de plugins Claude |
+| [`06-github-copilot.md`](./multi_agent_support/06-github-copilot.md) | Copilot CLI, VS Code, cloud agent y JetBrains |
+| [`07-herdr.md`](./multi_agent_support/07-herdr.md) | Herdr: plugins, socket API, integraciones y ejecución indirecta |
+| [`08-guia-plugin-multi-agente.md`](./multi_agent_support/08-guia-plugin-multi-agente.md) | Cómo construir un plugin para varios agentes desde un solo repo |
+| [`09-caso-de-estudio-synapse.md`](./multi_agent_support/09-caso-de-estudio-synapse.md) | Synapse: acoplamiento, riesgos, arquitectura de adaptadores y plan |
