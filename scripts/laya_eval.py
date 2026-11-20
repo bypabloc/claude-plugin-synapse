@@ -47,6 +47,12 @@ def regex_hit(command: str) -> bool:
 
 
 TRACE_SAMPLE = int(os.environ.get("TRACE_SAMPLE", "6000"))
+# Rutas del propio plugin (antes y después del monorepo): sus comandos traen payloads de prueba maliciosos
+SELF_PROJECTS = ("claude-plugin-synapse", "agent-plugin-synapse", "agent-plugins")
+
+
+def is_self_project(path: str) -> bool:
+    return any(name in path for name in SELF_PROJECTS)
 
 
 def trace_commands(sample: int = TRACE_SAMPLE) -> list[tuple[str, bool]]:
@@ -67,7 +73,7 @@ def trace_commands(sample: int = TRACE_SAMPLE) -> list[tuple[str, bool]]:
                 if row.get("hook") != "block_dangerous":
                     continue
                 if row.get("step") == "input":
-                    if "claude-plugin-synapse" not in str(row.get("cwd", "")):
+                    if not is_self_project(str(row.get("cwd", ""))):
                         commands[row["run"]] = str(row.get("command", ""))
                 elif row.get("step") == "laya" and row.get("run") in commands and row.get("result") in ("ok", "flagged"):
                     cmd = commands[row["run"]]
@@ -82,7 +88,7 @@ def build_dataset() -> None:
     real = json.load(open(EVAL_DIR / "real_commands.json"))
     for r in real:
         # Los comandos del propio plugin incluyen payloads de prueba maliciosos: no son tráfico benigno
-        if "claude-plugin-synapse" in r["project"]:
+        if is_self_project(r["project"]):
             continue
         rows.append({"command": r["command"], "label": 0, "source": "real", "split": _bucket(r["command"])})
     seen = {r["command"] for r in rows}

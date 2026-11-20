@@ -1,5 +1,8 @@
 # Claude Code Plugin: Synapse (`synapse`)
 
+> [!NOTE]
+> Este repo (`bypabloc/agent-plugin-synapse`) es un **espejo** generado desde el monorepo [`bypabloc/agent-plugins`](https://github.com/bypabloc/agent-plugins/tree/main/plugins/synapse). Los issues y pull requests van allí. El soporte para Codex, Antigravity y OpenCode está en curso ([spec 001](https://github.com/bypabloc/agent-plugins/tree/main/docs/specs/001-plugins-multi-agente)).
+
 [![Claude Code Compatible](https://img.shields.io/badge/Claude%20Code-Plugin-blueviolet)](https://github.com/anthropics/claude-plugins-official)
 [![System 1 AI: Laya Powered](https://img.shields.io/badge/Decision%20Engine-Laya%20System%201-orange)](https://github.com/convaiinnovations/laya)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -108,8 +111,8 @@ claude plugin details synapse@bypabloc
 Si deseas probar o depurar el plugin directamente desde el repositorio clonado:
 
 ```bash
-git clone https://github.com/bypabloc/claude-plugin-synapse.git
-claude --plugin-dir "./claude-plugin-synapse"
+git clone https://github.com/bypabloc/agent-plugin-synapse.git
+claude --plugin-dir "./agent-plugin-synapse"
 ```
 
 ---

@@ -19,7 +19,7 @@ Este documento define la arquitectura técnica, los protocolos de ciclo de vida 
 ## 2. Estructura de Directorios
 
 ```
-claude-plugin-synapse/
+plugins/synapse/                # en el monorepo bypabloc/agent-plugins (espejo: agent-plugin-synapse)
 ├── .claude-plugin/
 │   └── plugin.json             # Manifiesto oficial del plugin
 ├── hooks/

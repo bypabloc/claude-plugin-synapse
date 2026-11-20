@@ -8,6 +8,28 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "agent-plugin-synapse"
+version = "1.6.1"
+source = { virtual = "." }
+dependencies = [
+    { name = "laya" },
+    { name = "torch" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "laya", specifier = ">=0.3.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "torch", specifier = ">=2.1.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -38,28 +60,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/a3/c2/24167ea9858356b47
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl", hash = "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775", size = 136983, upload-time = "2026-07-22T03:35:11.276Z" },
 ]
-
-[[package]]
-name = "claude-plugin-synapse"
-version = "1.6.1"
-source = { virtual = "." }
-dependencies = [
-    { name = "laya" },
-    { name = "torch" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "laya", specifier = ">=0.3.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "torch", specifier = ">=2.1.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "click"
