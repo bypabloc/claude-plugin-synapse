@@ -104,5 +104,29 @@
       "cwd": "{project}"
     },
     "expected_exit": 0
+  },
+  {
+    "name": "ask_codex_config",
+    "payload": {"tool_name": "Edit", "tool_input": {"file_path": ".codex/config.toml"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_antigravity_hooks",
+    "payload": {"tool_name": "Write", "tool_input": {"file_path": ".agents/hooks.json"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_opencode_config",
+    "payload": {"tool_name": "Edit", "tool_input": {"file_path": "opencode.json"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
+  },
+  {
+    "name": "ask_synapse_neutral_config",
+    "payload": {"tool_name": "Write", "tool_input": {"file_path": ".synapse/commands.json"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
   }
 ]
