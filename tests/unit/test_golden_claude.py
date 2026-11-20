@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -20,8 +21,17 @@ CASES = [(hook, case) for hook in HOOKS for case in load_cases(hook)]
 _written: dict[str, dict[str, object]] = {}
 
 
+def _dashed(path: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "-", path)  # como claude_memory_dir
+
+
 def _normalize(text: str) -> str:
-    for real, marker in ((str(PROJECT_DIR), "{project}"), (GIT_ROOT, "{gitroot}"), (str(Path.home()), "{home}")):
+    """Rutas del entorno → marcadores, para que el golden sea igual en cualquier clon, CI o perfil de Claude."""
+    config = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    pairs = [(str(PROJECT_DIR), "{project}"), (GIT_ROOT, "{gitroot}"), (os.path.dirname(GIT_ROOT), "{gitroot_parent}"),
+             (_dashed(GIT_ROOT), "{gitroot_dashed}"), (_dashed(str(PROJECT_DIR)), "{project_dashed}"),
+             (config, "{claude_config}"), (str(Path.home()), "{home}")]
+    for real, marker in sorted(pairs, key=lambda p: -len(p[0])):
         text = text.replace(real, marker)
     return text
 

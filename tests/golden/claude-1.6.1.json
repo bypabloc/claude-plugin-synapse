@@ -242,7 +242,7 @@
  "block_dangerous/block_cd_dash_back_to_outside_dir": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'rm' sobre {home}/.agents/skills.\nComando recibido: cd ~ && cd {project}/tmp && cd - && rm -rf .agents/skills\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre {home}/.agents/skills.\nComando recibido: cd ~ && cd {project}/tmp && cd - && rm -rf .agents/skills\n"
  },
  "block_dangerous/block_chmod_777_etc": {
   "exit": 2,
@@ -272,12 +272,12 @@
  "block_dangerous/block_git_clone_outside_project": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'git' sobre /opt/otro-repo.\nComando recibido: git clone https://github.com/x/y.git /opt/otro-repo\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'git' sobre /opt/otro-repo.\nComando recibido: git clone https://github.com/x/y.git /opt/otro-repo\n"
  },
  "block_dangerous/block_git_dash_c_outside_remote_set_url": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'git' sobre /opt/otro-repo.\nComando recibido: git -C /opt/otro-repo remote set-url origin git@example.invalid:x/y.git\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'git' sobre /opt/otro-repo.\nComando recibido: git -C /opt/otro-repo remote set-url origin git@example.invalid:x/y.git\n"
  },
  "block_dangerous/block_git_dir_after_quoted_separator": {
   "exit": 2,
@@ -287,7 +287,7 @@
  "block_dangerous/block_git_dir_mv_outside_project": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'mv' sobre {home}/projects/bypabloc/claude-plugin-synapse-worktrees/backup-git.\nComando recibido: mv .git ../backup-git\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{gitroot_dashed}/memory): 'mv' sobre {gitroot_parent}/backup-git.\nComando recibido: mv .git ../backup-git\n"
  },
  "block_dangerous/block_git_dir_redirect": {
   "exit": 2,
@@ -317,32 +317,32 @@
  "block_dangerous/block_outside_after_cd": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'rm' sobre {home}/projects/x.\nComando recibido: cd {home} && rm -rf projects/x\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre {home}/projects/x.\nComando recibido: cd {home} && rm -rf projects/x\n"
  },
  "block_dangerous/block_outside_append": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'echo' sobre {home}/.zshrc.\nComando recibido: echo 'alias x=y' >> ~/.zshrc\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'echo' sobre {home}/.zshrc.\nComando recibido: echo 'alias x=y' >> ~/.zshrc\n"
  },
  "block_dangerous/block_outside_claude_config": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'rm' sobre {home}/.claude/settings.json.\nComando recibido: rm -f ~/.claude/settings.json\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre {home}/.claude/settings.json.\nComando recibido: rm -f ~/.claude/settings.json\n"
  },
  "block_dangerous/block_outside_cp_dest": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'cp' sobre /etc/motd.\nComando recibido: cp README.md /etc/motd\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'cp' sobre /etc/motd.\nComando recibido: cp README.md /etc/motd\n"
  },
  "block_dangerous/block_outside_dd_of": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'dd' sobre {home}/disk.img.\nComando recibido: dd if=/dev/zero of=~/disk.img bs=1M count=1\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'dd' sobre {home}/disk.img.\nComando recibido: dd if=/dev/zero of=~/disk.img bs=1M count=1\n"
  },
  "block_dangerous/block_outside_dotdot": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'rm' sobre {home}/projects/bypabloc/claude-plugin-synapse-worktrees/optical-soft.\nComando recibido: rm -rf ../optical-soft\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre {gitroot_parent}/optical-soft.\nComando recibido: rm -rf ../optical-soft\n"
  },
  "block_dangerous/block_outside_env_prefix": {
   "exit": 2,
@@ -352,22 +352,22 @@
  "block_dangerous/block_outside_find_delete": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'find' sobre {home}/Downloads.\nComando recibido: find ~/Downloads -name '*.zip' -delete\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'find' sobre {home}/Downloads.\nComando recibido: find ~/Downloads -name '*.zip' -delete\n"
  },
  "block_dangerous/block_outside_home_var": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'rm' sobre {home}/.zshrc.\nComando recibido: rm -f $HOME/.zshrc\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre {home}/.zshrc.\nComando recibido: rm -f $HOME/.zshrc\n"
  },
  "block_dangerous/block_outside_mv_dest": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'mv' sobre {home}/common.py.\nComando recibido: mv hooks/common.py ~/common.py\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'mv' sobre {home}/common.py.\nComando recibido: mv hooks/common.py ~/common.py\n"
  },
  "block_dangerous/block_outside_redirect": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'echo' sobre {home}/.bashrc.\nComando recibido: echo x > ~/.bashrc\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'echo' sobre {home}/.bashrc.\nComando recibido: echo x > ~/.bashrc\n"
  },
  "block_dangerous/block_outside_rm_other_repo": {
   "exit": 2,
@@ -377,22 +377,22 @@
  "block_dangerous/block_outside_sed_inplace": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'sed' sobre {home}/.gitconfig.\nComando recibido: sed -i 's/a/b/' ~/.gitconfig\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'sed' sobre {home}/.gitconfig.\nComando recibido: sed -i 's/a/b/' ~/.gitconfig\n"
  },
  "block_dangerous/block_outside_shred_ssh_key": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'shred' sobre {home}/.ssh/id_rsa.\nComando recibido: shred -u ~/.ssh/id_rsa\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'shred' sobre {home}/.ssh/id_rsa.\nComando recibido: shred -u ~/.ssh/id_rsa\n"
  },
  "block_dangerous/block_outside_sudo_rm": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'rm' sobre /var/lib/postgresql.\nComando recibido: sudo rm -rf /var/lib/postgresql\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre /var/lib/postgresql.\nComando recibido: sudo rm -rf /var/lib/postgresql\n"
  },
  "block_dangerous/block_outside_tee": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'tee' sobre /etc/hosts.\nComando recibido: echo x | tee /etc/hosts\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'tee' sobre /etc/hosts.\nComando recibido: echo x | tee /etc/hosts\n"
  },
  "block_dangerous/block_reverse_shell_dev_tcp": {
   "exit": 2,
@@ -417,7 +417,7 @@
  "block_dangerous/block_timeout_wrapper_destructive_outside": {
   "exit": 2,
   "stdout": "",
-  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins-plugins-synapse/memory, {home}/.claude/personal/projects/-home-bypabloc-projects-bypabloc-claude-plugin-synapse-worktrees-agent-plugins/memory): 'rm' sobre /etc/app.\nComando recibido: timeout 30 rm -rf /etc/app\n"
+  "stderr": "🚫 BLOCKED · Synapse · block_dangerous (python) · regla structure.outside_project\nProhibido modificar rutas fuera del proyecto ({gitroot}, {gitroot}-worktrees, {claude_config}/projects/{project_dashed}/memory, {claude_config}/projects/{gitroot_dashed}/memory): 'rm' sobre /etc/app.\nComando recibido: timeout 30 rm -rf /etc/app\n"
  },
  "block_dangerous/block_wget_pipe_sudo_sh": {
   "exit": 2,
