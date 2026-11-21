@@ -86,7 +86,9 @@ def denial_text(decision: hosts.Decision, approval_id: str) -> str:
             "Requiere confirmación del usuario. Codex no permite preguntar desde un hook, así que la aprobación es manual:\n"
             f"  ejecuta en TU terminal (fuera del agente):  {command_hint(approval_id)}\n"
             "  (vence en 30 min; aprueba una sola ejecución de este mismo comando)\n"
-            "Agente: no intentes aprobarlo, reformular el comando ni rodear la regla. Informa al usuario y espera su respuesta.")
+            "Agente: no intentes aprobarlo ni rodear la regla (ni con otra herramienta ni con otro comando que haga lo mismo). "
+            "Si la acción incluía otros cambios, aplícalos aparte sin este archivo y sigue con el trabajo que no dependa "
+            "de él. Deja anotado lo pendiente y, al cerrar el turno, pídele al usuario que ejecute el comando de arriba.")
 
 
 def resolve(event: hosts.HookEvent, decision: hosts.Decision, now: float | None = None) -> hosts.Decision:

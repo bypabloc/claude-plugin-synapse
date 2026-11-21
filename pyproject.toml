@@ -1,6 +1,6 @@
 [project]
 name = "agent-plugin-synapse"
-version = "1.7.0"
+version = "1.7.1"
 description = "Real-time security guardrails and PreToolUse interceptors for coding agents powered by Laya System 1"
 readme = "README.md"
 requires-python = ">=3.10"

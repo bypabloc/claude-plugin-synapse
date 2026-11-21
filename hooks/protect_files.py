@@ -50,8 +50,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hosts  # noqa: E402
 
 from common import (
-    ASK_PATTERNS,
     PROTECTED_PATTERNS,
+    agent_config_pattern,
     TEMPLATE_SUFFIXES,
     emit_block,
     emit_decision,
@@ -136,7 +136,7 @@ def evaluate_target_path(file_path: str, cwd: str, tool_name: str = "Edit/Write"
         )
 
     # 4. Solicitud de confirmación determinística para configuraciones de Claude
-    config = next((pat for pat in ASK_PATTERNS if pat in match_path), None)
+    config = agent_config_pattern(match_path)
     if config:
         emit_decision("ask", f"Configuración de agentes o del IDE: requiere aprobación explícita ({file_path})",
                       decided_by="python", rule="path.agent_config", evidence={"pattern": config}, **decision)

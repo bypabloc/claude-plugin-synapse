@@ -95,8 +95,19 @@ def run(host: str, raw_text: str) -> tuple[int, str, str]:
     return hosts.emit(host, decision)
 
 
+def _utf8_streams() -> None:
+    """Los hosts hablan UTF-8. En Windows, Python usa la página de códigos de la consola (cp1252) y Codex mostraba
+    "Synapse � …": stdin, stdout y stderr pasan a UTF-8 antes de leer o escribir."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main() -> int:
     host = _host(sys.argv[1:])
+    _utf8_streams()
     try:
         raw_text = sys.stdin.read()
         code, out, err = run(host, raw_text)

@@ -829,6 +829,11 @@
   "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"Synapse \\u00b7 protect_files (python) \\u00b7 regla path.agent_config: Configuraci\\u00f3n de agentes o del IDE: requiere aprobaci\\u00f3n expl\\u00edcita (.agents/hooks.json)\"}}",
   "stderr": ""
  },
+ "protect_files/ask_antigravity_rule_not_markdown": {
+  "exit": 0,
+  "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"Synapse \\u00b7 protect_files (python) \\u00b7 regla path.agent_config: Configuraci\\u00f3n de agentes o del IDE: requiere aprobaci\\u00f3n expl\\u00edcita (.agents/rules/policy.json)\"}}",
+  "stderr": ""
+ },
  "protect_files/ask_codex_config": {
   "exit": 0,
   "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"Synapse \\u00b7 protect_files (python) \\u00b7 regla path.agent_config: Configuraci\\u00f3n de agentes o del IDE: requiere aprobaci\\u00f3n expl\\u00edcita (.codex/config.toml)\"}}",
@@ -842,6 +847,11 @@
  "protect_files/ask_synapse_neutral_config": {
   "exit": 0,
   "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"Synapse \\u00b7 protect_files (python) \\u00b7 regla path.agent_config: Configuraci\\u00f3n de agentes o del IDE: requiere aprobaci\\u00f3n expl\\u00edcita (.synapse/commands.json)\"}}",
+  "stderr": ""
+ },
+ "protect_files/pass_antigravity_rule_markdown": {
+  "exit": 0,
+  "stdout": "",
   "stderr": ""
  },
  "protect_files/protect_allow_env_example_template": {

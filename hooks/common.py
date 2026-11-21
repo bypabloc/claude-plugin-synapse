@@ -103,6 +103,17 @@ ASK_PATTERNS = (
     ".opencode/plugins/",
     ".opencode/tools/",
 )
+# Dentro de estas carpetas de gobierno, un .md es una instrucción (como AGENTS.md o CLAUDE.md), no un permiso:
+# el agente lo edita sin aprobación. Pedirla dejaba a Codex esperando al usuario (content-studio 012, 2026-11-21)
+INSTRUCTION_DIRS = (".agents/rules/",)
+
+
+def agent_config_pattern(match_path: str) -> str | None:
+    """Patrón de ASK_PATTERNS que protege la ruta (con '/'), salvo las instrucciones en Markdown de INSTRUCTION_DIRS."""
+    for pat in ASK_PATTERNS:
+        if pat in match_path and not (pat in INSTRUCTION_DIRS and match_path.lower().endswith(".md")):
+            return pat
+    return None
 
 
 LAYA_HOOKS = ("block_dangerous", "block_env_read", "detect_secrets", "protect_files")

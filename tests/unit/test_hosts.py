@@ -339,6 +339,30 @@ def test_approval_never_turns_a_block_into_pass() -> None:
     assert "approve" not in out and emitted("codex", out) == "deny"
 
 
+def test_codex_denial_lets_the_agent_keep_working() -> None:
+    # content-studio 012 (2026-11-21): un patch de docs con un archivo protegido dejó a Codex esperando al usuario
+    _, out, _ = run_dispatch("codex", codex_bash(ASK, "keep"))
+    reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "espera su respuesta" not in reason
+    assert "sigue con el trabajo que no dependa" in reason
+    assert "sin este archivo" in reason
+
+
+def test_dispatch_main_writes_utf8_even_with_a_legacy_console(tmp_path: Path) -> None:
+    # En Windows, Python escribe en cp1252 y Codex lo lee como UTF-8: "Synapse · …" llegaba como "Synapse � …"
+    import subprocess
+    import sys
+
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+    payload = json.dumps(codex_patch("*** Begin Patch\n*** Add File: .codex/config.toml\n+x = 1\n*** End Patch"),
+                         ensure_ascii=False).encode("utf-8")
+    script = Path(dispatch.__file__)
+    proc = subprocess.run([sys.executable, str(script), "--host", "codex"], input=payload, capture_output=True,
+                          env=env, cwd=str(PROJECT_DIR), check=False)
+    text = proc.stdout.decode("utf-8")  # falla si salió en cp1252
+    assert proc.returncode == 0 and "Synapse ·" in text
+
+
 def test_agent_cannot_run_approve() -> None:
     _, out, _ = run_dispatch("codex", codex_bash('python3 "/x/scripts/synapse.py" approve abcd1234'))
     assert "structure.self_approval" in out

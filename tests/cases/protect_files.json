@@ -128,5 +128,18 @@
     "payload": {"tool_name": "Write", "tool_input": {"file_path": ".synapse/commands.json"}, "cwd": "{project}"},
     "expected_exit": 0,
     "expected_decision": "ask"
+  },
+  {
+    "name": "pass_antigravity_rule_markdown",
+    "_comment": "Visto en content-studio 012 (Codex, 2026-11-21): una regla .md es instrucción, como AGENTS.md; pedir aprobación dejó al agente esperando",
+    "payload": {"tool_name": "Edit", "tool_input": {"file_path": ".agents/rules/stack.md"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": null
+  },
+  {
+    "name": "ask_antigravity_rule_not_markdown",
+    "payload": {"tool_name": "Write", "tool_input": {"file_path": ".agents/rules/policy.json"}, "cwd": "{project}"},
+    "expected_exit": 0,
+    "expected_decision": "ask"
   }
 ]
