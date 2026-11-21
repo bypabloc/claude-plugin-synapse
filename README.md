@@ -1,7 +1,7 @@
 # Claude Code Plugin: Synapse (`synapse`)
 
 > [!NOTE]
-> Este repo (`bypabloc/agent-plugin-synapse`) es un **espejo** generado desde el monorepo [`bypabloc/agent-plugins`](https://github.com/bypabloc/agent-plugins/tree/main/plugins/synapse). Los issues y pull requests van allí. El soporte para Codex, Antigravity y OpenCode está en curso ([spec 001](https://github.com/bypabloc/agent-plugins/tree/main/docs/specs/001-plugins-multi-agente)).
+> Este repo (`bypabloc/agent-plugin-synapse`) es un **espejo** generado desde el monorepo [`bypabloc/agent-plugins`](https://github.com/bypabloc/agent-plugins/tree/main/plugins/synapse). Los issues y pull requests van allí. El soporte para Codex, Antigravity y OpenCode se diseñó en el [spec 001](https://github.com/bypabloc/agent-plugins/tree/synapse-v1.7.0/docs/specs/001-plugins-multi-agente).
 
 [![Claude Code Compatible](https://img.shields.io/badge/Claude%20Code-Plugin-blueviolet)](https://github.com/anthropics/claude-plugins-official)
 [![System 1 AI: Laya Powered](https://img.shields.io/badge/Decision%20Engine-Laya%20System%201-orange)](https://github.com/convaiinnovations/laya)
@@ -106,7 +106,7 @@ claude plugin details synapse@bypabloc
 
 ### En Codex, Antigravity y OpenCode
 
-Synapse es multi-agente desde 1.7.0 ([spec 001](https://github.com/bypabloc/agent-plugins/tree/main/docs/specs/001-plugins-multi-agente)). La lógica es la misma en todos; cambian la entrada y la salida de cada agente (`hooks/hosts.py`). Requisito: Python 3.10 o superior (`python3` en Linux y macOS; `py -3` o `python` en Windows, o `SYNAPSE_PYTHON`).
+Synapse es multi-agente desde 1.7.0 ([spec 001](https://github.com/bypabloc/agent-plugins/tree/synapse-v1.7.0/docs/specs/001-plugins-multi-agente)). La lógica es la misma en todos; cambian la entrada y la salida de cada agente (`hooks/hosts.py`). Requisito: Python 3.10 o superior (`python3` en Linux y macOS; `py -3` o `python` en Windows, o `SYNAPSE_PYTHON`).
 
 | Agente | Instalación (WSL, Linux, macOS o Windows) | Cómo decide |
 | :--- | :--- | :--- |

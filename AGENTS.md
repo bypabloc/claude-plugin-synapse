@@ -42,7 +42,7 @@ plugins/synapse/                # en el monorepo bypabloc/agent-plugins (espejo:
 │   ├── cases/<hook>.json       # Casos declarativos por hook
 │   ├── unit/                   # Un módulo por hook + disposable targets, audit log, manifiesto
 │   └── e2e/                    # Pipeline PreToolUse completo desde hooks.json sobre un repo git real
-├── marketplace-entry.json      # Metadatos para el catálogo bypabloc/claude-plugins
+├── marketplace-entry.json      # Metadatos de la entrada del plugin en un catálogo externo
 ├── README.md                   # Documentación orientada a usuarios y desarrolladores
 └── AGENTS.md                   # Este manual técnico
 ```
