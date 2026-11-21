@@ -22,7 +22,7 @@ Contexto y Propósito:
   6. Confirmación determinística para cualquier comando que involucre la carpeta .git.
   7. Fallback automático a las reglas de seguridad determinísticas si no hay GPU o falla Laya.
 
-Vínculos con la investigación en docs/research/laya/:
+Vínculos con la investigación en docs/research/laya/ (en la raíz del monorepo agent-plugins):
   - docs/research/laya/08-casos-de-uso-y-patrones-arquitecturales.md:
       Patrón "Guardrails de Seguridad y Pre-Gating para LLMs".
   - docs/research/laya/03-guia-de-uso-y-primitivas.md:
